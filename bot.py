@@ -8,6 +8,8 @@ from config import config
 from database import db
 from views.shift_view import ShiftView
 from views.admin_view import AdminView
+from views.afk_view import AFKVerificationView
+from services.panel_manager import panel_manager
 
 # Loglama Yapılandırması
 logging.basicConfig(
@@ -42,10 +44,11 @@ class Lucas2MesaiBot(commands.Bot):
         # Bu işlem sayesinde bot yeniden başlatılsa bile eski butonlar çalışmaya devam eder
         self.add_view(ShiftView())
         self.add_view(AdminView())
-        logger.info("Kalıcı View bileşenleri (ShiftView, AdminView) başarıyla kaydedildi.")
+        self.add_view(AFKVerificationView())
+        logger.info("Kalıcı View bileşenleri (ShiftView, AdminView, AFKVerificationView) başarıyla kaydedildi.")
 
         # Cog modüllerini yükle
-        cogs = ["cogs.shift_cog", "cogs.admin_cog"]
+        cogs = ["cogs.shift_cog", "cogs.admin_cog", "cogs.tracker_cog"]
         for cog in cogs:
             try:
                 await self.load_extension(cog)
@@ -80,6 +83,14 @@ class Lucas2MesaiBot(commands.Bot):
             name="Personel Mesailerini ⏱️"
         )
         await self.change_presence(status=discord.Status.online, activity=activity)
+
+        # Başlangıçta panelleri güncelle
+        for guild in self.guilds:
+            try:
+                await panel_manager.update_all_panels(guild)
+            except Exception as e:
+                logger.warning(f"Başlangıç paneli güncellenirken hata ({guild.name}): {e}")
+
 
     async def on_command_error(self, ctx: commands.Context, error: Exception):
         """Genel komut hata yakalayıcı."""

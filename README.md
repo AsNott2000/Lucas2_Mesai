@@ -6,23 +6,34 @@ Lucas2 Mesai Botu; Discord sunucularında personellerin, moderatörlerin veya ye
 
 ## 🚀 Temel Özellikler
 
-1. **Kullanıcı Paneli (`#mesai` Kanalı):**
-   - 🟢 **Mesai Başlat (`btn_start_shift`):** Personelin çalışma süresini başlatır. Aktif mesai varken tekrar başlatmayı engeller.
-   - 🔴 **Mesai Bitir (`btn_end_shift`):** Aktif mesaiyi sonlandırır, geçen süreyi (saat, dakika, saniye) hesaplar ve kullanıcıya özel özet sunar.
-   - 👤 **Bireysel İstatistik (`/mesaim`):** Personelin bugüne kadarki toplam oturum ve çalışma saatini gösterir.
+### 1. Kullanıcı Paneli (`#mesai` Kanalı)
+- 🟢 **Mesai Başlat (`btn_start_shift`):** Personelin çalışma süresini başlatır. Aktif mesai varken tekrar başlatmayı engeller.
+- 🔴 **Mesai Bitir (`btn_end_shift`):** Aktif mesaiyi sonlandırır, geçen süreyi (saat, dakika, saniye) hesaplar ve kullanıcıya özel özet sunar.
+- 🧹 **Otomatik Kanal Temizliği:** Mesai bitiminde veya sohbete yazılan mesajlarda kanal otomatik temizlenerek ana buton paneli daima en altta ve sabit kalır (Scroll kirliliği yaşanmaz).
+- 👤 **Bireysel İstatistik (`/mesaim`):** Personelin bugüne kadarki toplam oturum ve çalışma saatini gösterir.
 
-2. **Yönetici Paneli (`#admin-settings` Kanalı):**
-   - 🛡️ **Rol / Yetki Koruması:** Yalnızca `Administrator` veya `.env` içerisinde belirlenen yetkili rol ID'sine sahip üyeler erişebilir.
-   - 📊 **Genel Rapor Al (`btn_get_report` / `/mesai-rapor`):** Tüm personellerin toplam mesai sürelerini, oturum sayılarını ve son aktiflik zamanlarını Discord Embed tablosu halinde listeler.
-   - 🟢 **Anlık Aktif Mesailer (`btn_active_shifts` / `/aktif-mesailer`):** Şu anda mesaisi devam eden personelleri anlık listeler.
-   - 👮 **Yetkili Müdahalesi (`/mesai-bitir-yetkili`):** Açık unutulmuş mesaileri yönetici tarafından kapatır.
+### 2. Canlı Aktif Mesai Takibi (`#aktif-mesailer` Kanalı)
+- 🟢 **Otomatik Canlı Embed:** Bu kanalda tek bir sabit mesaj yer alır.
+- Herhangi bir personel mesaiye başladığında veya bitirdiğinde anında güncellenir (`message.edit`).
+- Aktif görevdeki personelleri, başlangıç saatlerini ve ne kadar süredir mesaide olduklarını dinamik olarak listeler. Aktif kimse yoksa `"Şu an aktif mesaide kimse bulunmamaktadır."` bilgisini gösterir.
 
-3. **Kalıcı Butonlar (Persistent Views):**
-   - Bot yeniden başlatılsa (restart) dahi mesajlardaki butonlar bozulmaz veya işlevsiz kalmaz.
+### 3. Genel Mesai Tablosu & İstatistik Paneli (`#mesai-tablo` Kanalı)
+- 🏆 **Liderlik ve İstatistik Tablosu:** Veritabanındaki verilere dayanarak tüm personellerin toplam çalışma süresi, oturum sayısı ve son aktiflik zamanını madalyalı (🥇, 🥈, 🥉) sıralı liste olarak gösterir.
+- Oturum bitimlerinde ve periyodik arka plan görevleriyle düzenli olarak güncellenir.
 
-4. **Hızlı ve Güvenilir Asenkron Veritabanı:**
-   - `aiosqlite` ile asenkron SQLite veritabanı.
-   - Çift tıklama ve yarış durumlarına (race condition) karşı eşzamanlılık kilidi.
+### 4. Otomatik Çalışma / AFK Doğrulama Mekanizması (45 Dakikada Bir)
+- ⏱️ **45 Dakikalık Zamanlayıcı:** Mesai başlatan her personel için arka planda 45 dakikalık aktiflik döngüsü çalışır.
+- 💬 **İnteraktif Doğrulama Butonu:** Süre dolduğunda bot kullanıcıya DM üzerinden `"Buradayım / Mesaiyi Doğrula"` butonu gönderir (DM kapalıysa mesai kanalında geçici ping atar).
+- ⏳ **5 Dakika Yanıt Süresi:**
+  - **Doğrularsa:** Zamanlayıcı sıfırlanır ve sonraki 45 dakika için mesai devam eder.
+  - **Doğrulamazsa (Zaman Aşımı):** Personelin mesaisi otomatik olarak kapatılır (`AFK_CLOSED`), süre hesaplanır, log kanalına denetim kaydı düşülür ve kullanıcı bilgilendirilir.
+- 🔄 **Yeniden Başlatma Dayanıklılığı:** Bot restart atsa bile SQLite `last_verified_at` zaman damgaları sayesinde aktif zamanlayıcılar ve durumlar korunur.
+
+### 5. Yönetici Paneli (`#admin-settings` Kanalı)
+- 🛡️ **Rol / Yetki Koruması:** Yalnızca `Administrator` veya `.env` içerisinde belirlenen yetkili role sahip üyeler erişebilir.
+- 📊 **Genel Rapor Al (`btn_get_report` / `/mesai-rapor`):** Tüm personellerin toplam mesai sürelerini listeler.
+- 🟢 **Anlık Aktif Mesailer (`btn_active_shifts` / `/aktif-mesailer`):** Şu anda görevde olan personelleri anlık listeler.
+- 👮 **Yetkili Müdahalesi (`/mesai-bitir-yetkili`):** Açık unutulmuş mesaileri yönetici tarafından kapatır.
 
 ---
 
@@ -31,21 +42,27 @@ Lucas2 Mesai Botu; Discord sunucularında personellerin, moderatörlerin veya ye
 ```text
 Lucas2_Mesai/
 ├── cogs/
-│   ├── admin_cog.py        # Yönetici slash komutları (/kurulum-admin, /mesai-rapor vb.)
-│   └── shift_cog.py        # Mesai komutları (/kurulum-mesai, /mesaim, /aktif-mesailer)
+│   ├── admin_cog.py        # Yönetici slash komutları (/kurulum-hepsi, /kurulum-aktif-mesailer vb.)
+│   ├── shift_cog.py        # Mesai komutları (/kurulum-mesai, /mesaim, /aktif-mesailer)
+│   └── tracker_cog.py      # Arka plan AFK kontrolü ve canlı panellerin senkronizasyon döngüsü
 ├── database/
 │   ├── __init__.py
-│   └── db_manager.py       # Asenkron SQLite veritabanı sürücüsü ve sorgular
+│   └── db_manager.py       # Asenkron SQLite veritabanı sürücüsü, migrasyonlar ve ayarlar
+├── services/
+│   ├── __init__.py
+│   └── panel_manager.py    # Canlı embed güncelleme, kanal temizleme ve log servisi
 ├── tests/
-│   ├── test_database.py    # Veritabanı ve iş mantığı testleri
+│   ├── test_database.py    # Veritabanı ve AFK iş mantığı testleri
+│   ├── test_tracker.py     # Canlı paneller ve takip testleri
 │   └── test_views.py       # UI View ve Custom ID testleri
 ├── utils/
 │   ├── formatters.py       # Zaman, süre ve Discord Embed biçimlendiricileri
 │   └── permissions.py      # Yönetici ve rol yetki doğrulayıcı
 ├── views/
 │   ├── admin_view.py       # #admin-settings kanalı kalıcı yönetim butonları
+│   ├── afk_view.py         # 45 dakikalık AFK doğrulama kalıcı butonu
 │   └── shift_view.py       # #mesai kanalı kalıcı personel butonları
-├── .env.example            # Örnek ortam değişkenleri şablonu
+├── .env                    # Ortam değişkenleri ve kanal ayarları
 ├── .gitignore              # Git tarafından yoksayılacak dosyalar
 ├── bot.py                  # Bot ana sınıfı ve yaşam döngüsü
 ├── config.py               # Konfigürasyon yükleyici
@@ -56,73 +73,37 @@ Lucas2_Mesai/
 
 ---
 
-## ⚙️ Kurulum Adımları
+## 🛠️ Discord Slash Kurulum Komutları
 
-### 1. Discord Botunu Oluşturma (Developer Portal)
-1. [Discord Developer Portal](https://discord.com/developers/applications) adresine gidin ve yeni bir uygulama oluşturun.
-2. **Bot** sekmesine geçin ve **Reset Token** butonuna basarak bot tokeninizi kopyalayın.
-3. Aşağıdaki **Privileged Gateway Intents** seçeneklerini aktif edin:
-   - ✅ **Server Members Intent**
-   - ✅ **Message Content Intent**
-4. **OAuth2 > URL Generator** sekmesine gidin:
-   - Scopes: `bot`, `applications.commands`
-   - Bot Permissions: `Administrator` (veya `Send Messages`, `Embed Links`, `Use Slash Commands`)
-   - Oluşturulan link ile botu sunucunuza davet edin.
-
----
-
-### 2. Proje Kurulumu ve Çalıştırma
-
-```bash
-# 1. Gerekli kütüphaneleri yükleyin:
-pip install -r requirements.txt
-
-# 2. .env dosyasını oluşturun (.env.example dosyasından kopyalayabilirsiniz):
-# Windows (PowerShell):
-Copy-Item .env.example .env
-
-# 3. .env dosyasını açıp bilgilerinizi girin:
-# DISCORD_TOKEN=BOT_TOKENINIZ
-# GUILD_ID=SUNUCU_IDNIZ
-# ADMIN_ROLE_ID=YETKILI_ROL_IDNIZ (Opsiyonel)
-```
-
-```bash
-# 4. Botu başlatın:
-python bot.py
-# veya
-python main.py
-```
-
----
-
-## 🛠️ Botun İlk Kurulumu (Discord Üzerinde)
-
-1. Sunucunuzda `#mesai` metin kanalına gidin ve slash komutunu çalıştırın:
-   ```text
-   /kurulum-mesai
-   ```
-   *Bot bu kanala kalıcı "Mesai Başlat" ve "Mesai Bitir" butonlarını içeren mesajı gönderecektir.*
-
-2. Sunucunuzda yalnızca yetkililerin gördüğü `#admin-settings` kanalına gidin ve çalıştırın:
-   ```text
-   /kurulum-admin
-   ```
-   *Bot bu kanala kalıcı "Genel Rapor Al" ve "Anlık Aktif Mesailer" butonlarını gönderecektir.*
+| Komut | Açıklama |
+| :--- | :--- |
+| `/kurulum-hepsi` | **Tek tıkla tüm kanalları (`#mesai`, `#aktif-mesailer`, `#mesai-tablo`, `#admin-settings`, `#mesai-log`) ve panelleri otomatik kurar.** |
+| `/kurulum-mesai [kanal]` | `#mesai` kanalına ana Mesai Başlat/Bitir panelini kurar ve eski mesajları temizler. |
+| `/kurulum-aktif-mesailer [kanal]` | `#aktif-mesailer` kanalına canlı otomatik güncellenen aktif mesai listesi panelini kurar. |
+| `/kurulum-mesai-tablo [kanal]` | `#mesai-tablo` kanalına genel sıralama ve istatistik panelini kurar. |
+| `/kurulum-admin [kanal]` | `#admin-settings` kanalına yönetici kontrol panelini kurar. |
+| `/mesai-temizle [kanal]` | Belirtilen mesai kanalını ana panel hariç temizler. |
+| `/mesaim` | Personelin kendi aktif durumunu ve toplam mesai saatini gösterir. |
+| `/aktif-mesailer` | Anlık görevdeki tüm personelleri listeler. |
+| `/mesai-rapor` | Sunucu geneli tüm mesai istatistiklerini raporlar. |
+| `/mesai-bitir-yetkili [üye]` | Açık unutulmuş bir mesaiyi yönetici olarak sonlandırır. |
 
 ---
 
 ## 🧪 Testleri Çalıştırma
 
-Tüm veritabanı, hesaplama ve bileşen testlerini çalıştırmak için:
+Tüm veritabanı, AFK doğrulama, canlı panel ve bileşen testlerini çalıştırmak için:
 ```bash
 python -m unittest discover -s tests -v
 ```
 
 ---
 
-## 🔒 Hata Toleransı & Güvenlik Önlemleri
-- **Çakışan Mesai:** Bir personel mesaideyken yeniden "Mesai Başlat" butonuna basarsa işlem engellenir ve kaç saattir mesaide olduğu hatırlatılır.
+## 🔒 Kalıcılık ve Güvenlik
+- **Yeniden Başlatma Dayanıklılığı:** Panel mesaj ID'leri `settings` tablosunda, personellerin son doğrulama zamanları `last_verified_at` olarak SQLite'ta saklanır. Bot yeniden başlatıldığında paneller ve zamanlayıcılar kaldığı yerden devam eder.
+- **Çakışan Mesai Koruması:** Aktif mesaisi olan personeller ikinci bir mesai açamaz.
+- **AFK Otomatik Kapatma:** Doğrulama yapmayan üyelerin mesaileri haksız süre birikimini önlemek adına otomatik sonlandırılır.
 - **Açık Mesai Olmadan Bitirme:** Açık kaydı olmayan personeller "Mesai Bitir"e basarsa nazik bir hata mesajı ile uyarılır.
 - **Yetkisiz Rapor Erişimi:** Yönetici paneli ve rapor komutları, tıklayan kişinin `Administrator` veya belirlenen yetkili role sahip olup olmadığını her istekte canlı kontrol eder.
 - **Gizli (Ephemeral) Yanıtlar:** Personellerin buton tıklamaları ve raporlar yalnızca ilgili kullanıcıya özel (ephemeral) olarak gösterilir, kanallarda mesaj kirliliği oluşturmaz.
+

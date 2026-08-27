@@ -115,6 +115,61 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
         active_after = await self.db.get_active_shift(guild_id, user_id)
         self.assertIsNone(active_after)
 
+    async def test_settings_storage(self):
+        """Settings tablosu okuma ve yazma testi."""
+        guild_id = 9999
+        await self.db.set_setting(guild_id, "panel_aktif_mesailer_channel_id", "123456789")
+        await self.db.set_setting(guild_id, "panel_aktif_mesailer_message_id", "987654321")
+
+        val1 = await self.db.get_setting(guild_id, "panel_aktif_mesailer_channel_id")
+        val2 = await self.db.get_setting(guild_id, "panel_aktif_mesailer_message_id")
+        val_none = await self.db.get_setting(guild_id, "non_existent_key")
+
+        self.assertEqual(val1, "123456789")
+        self.assertEqual(val2, "987654321")
+        self.assertIsNone(val_none)
+
+        all_settings = await self.db.get_all_settings(guild_id)
+        self.assertEqual(len(all_settings), 2)
+        self.assertEqual(all_settings["panel_aktif_mesailer_channel_id"], "123456789")
+
+    async def test_afk_shift_end_and_verification(self):
+        """AFK doğrulama ve AFK mesai kapatma testi."""
+        guild_id = 9999
+        user_id = 7788
+        start_time = datetime(2026, 8, 27, 8, 0, 0, tzinfo=timezone.utc)
+
+        # Mesai başlat
+        success, shift, msg = await self.db.start_shift(guild_id, user_id, "AFKUser", start_time)
+        self.assertTrue(success)
+        self.assertEqual(shift["last_verified_at"], start_time.isoformat())
+
+        # Doğrulama mesajı gönderildiğini işaretle
+        sent_time = start_time + timedelta(minutes=45)
+        sent_ok = await self.db.set_verification_sent(guild_id, user_id, sent_time)
+        self.assertTrue(sent_ok)
+
+        # Doğrulamayı onayla
+        verified_time = sent_time + timedelta(minutes=2)
+        ver_ok = await self.db.update_last_verified(guild_id, user_id, verified_time)
+        self.assertTrue(ver_ok)
+
+        active = await self.db.get_active_shift(guild_id, user_id)
+        self.assertEqual(active["last_verified_at"], verified_time.isoformat())
+        self.assertIsNone(active["verification_sent_at"])
+
+        # Zaman aşımı ile AFK kapat
+        end_time = verified_time + timedelta(minutes=50)
+        afk_success, afk_result, afk_msg = await self.db.end_shift_afk(guild_id, user_id, end_time)
+        self.assertTrue(afk_success)
+        self.assertIsNotNone(afk_result)
+
+        # Raporlarda AFK oturumunun süresi ve sayısı doğru hesaplanmalı
+        stats = await self.db.get_user_stats(guild_id, user_id)
+        self.assertEqual(stats["total_shifts"], 1)
+        self.assertGreater(stats["total_duration"], 0)
+        self.assertFalse(stats["is_active"])
+
     def test_duration_formatter(self):
         """Formatlayıcı metin testi."""
         self.assertEqual(format_duration(0), "0 sn")
@@ -125,3 +180,4 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

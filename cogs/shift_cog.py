@@ -23,11 +23,11 @@ class ShiftCog(commands.Cog):
 
     @app_commands.command(
         name="kurulum-mesai",
-        description="Belirtilen kanala kalıcı Mesai Başlat / Bitir panelini gönderir."
+        description="Belirtilen kanala kalıcı Mesai Başlat / Bitir panelini gönderir ve kanalı temizler."
     )
     @app_commands.describe(kanal="Mesai panelinin gönderileceği metin kanalı (Boş bırakılırsa mevcut kanal kullanılır)")
     async def setup_mesai(self, interaction: discord.Interaction, kanal: Optional[discord.TextChannel] = None):
-        """#mesai kanalına kalıcı kontrol panelini kurar."""
+        """#mesai kanalına kalıcı kontrol panelini kurar ve kanal kirliliğini temizler."""
         if not has_admin_permission(interaction.user):
             await interaction.response.send_message(
                 embed=create_error_embed("Yetkisiz Erişim", "Bu kurulum komutunu yalnızca yöneticiler kullanabilir."),
@@ -47,16 +47,26 @@ class ShiftCog(commands.Cog):
         view = ShiftView()
 
         try:
-            await target_channel.send(embed=embed, view=view)
+            # Önceki eski mesajları temizle
+            await target_channel.purge(limit=50, check=lambda m: not m.pinned)
+            
+            # Kalıcı paneli gönder
+            panel_msg = await target_channel.send(embed=embed, view=view)
+            
+            # Veritabanına panel bilgilerini kaydet
+            await db.set_setting(interaction.guild_id, "panel_mesai_channel_id", str(target_channel.id))
+            await db.set_setting(interaction.guild_id, "panel_mesai_message_id", str(panel_msg.id))
+
             await interaction.response.send_message(
-                f"✅ Mesai paneli başarıyla {target_channel.mention} kanalına gönderildi!",
+                f"✅ Mesai paneli başarıyla {target_channel.mention} kanalına kuruldu ve kaydedildi!",
                 ephemeral=True
             )
         except discord.Forbidden:
             await interaction.response.send_message(
-                embed=create_error_embed("Yetki Hatası", f"Botun {target_channel.mention} kanalına mesaj gönderme yetkisi yok."),
+                embed=create_error_embed("Yetki Hatası", f"Botun {target_channel.mention} kanalına mesaj gönderme veya silme yetkisi yok."),
                 ephemeral=True
             )
+
 
     @app_commands.command(
         name="mesaim",

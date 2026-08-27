@@ -61,8 +61,12 @@ def create_shift_panel_embed() -> discord.Embed:
         color=0x5865F2  # Discord Blurple
     )
     embed.add_field(
-        name="📋 Bilgilendirme",
-        value="• Tüm giriş/çıkış kayıtları veritabanında güvenle saklanır.\n• Birden fazla çakışan mesai başlatılamaz.",
+        name="📋 Bilgilendirme & Kurallar",
+        value=(
+            "• Tüm giriş/çıkış kayıtları veritabanında güvenle saklanır.\n"
+            "• Mesai boyunca her 45 dakikada bir aktiflik doğrulaması istenir.\n"
+            "• Birden fazla çakışan mesai başlatılamaz."
+        ),
         inline=False
     )
     embed.set_footer(text="Lucas2 Mesai Takip Botu • Güvenli & Otomatik Kayıt")
@@ -156,22 +160,76 @@ def create_error_embed(title: str, message: str) -> discord.Embed:
     )
     return embed
 
-def create_admin_report_embed(reports: List[Dict[str, Any]], guild: Optional[discord.Guild] = None) -> discord.Embed:
-    """Tüm personellerin mesai sürelerini listeleyen yönetici rapor embedi."""
+def create_live_active_shifts_embed(active_shifts: List[Dict[str, Any]]) -> discord.Embed:
+    """#aktif-mesailer kanalı için canlı, dinamik güncellenen embed paneli."""
     embed = discord.Embed(
-        title="📊 TÜM PERSONEL MESAİ ÖZET RAPORU",
-        description="Aşağıda sunucudaki personellerin toplam çalışma istatistikleri listelenmiştir:\n",
-        color=0x3498DB  # Info Blue
+        title="🟢 CANLI AKTİF MESAİ TAKİBİ",
+        color=0x2ECC71 if active_shifts else 0x747F8D
+    )
+
+    if not active_shifts:
+        embed.description = (
+            "```yaml\nŞu an aktif mesaide kimse bulunmamaktadır.\n```\n"
+            "📌 *Mesai başlatmak için lütfen ilgili mesai kanalındaki butonları kullanınız.*"
+        )
+        embed.set_footer(text="Lucas2 Canlı Mesai Takip Sistemi • Otomatik Güncellenir")
+        embed.timestamp = datetime.now(timezone.utc)
+        return embed
+
+    embed.description = f"Şu anda sunucuda aktif görevde bulunan **{len(active_shifts)}** personel listelenmektedir:\n"
+
+    for idx, shift in enumerate(active_shifts, 1):
+        user_id = shift.get("user_id")
+        user_name = shift.get("user_name", "Bilinmiyor")
+        start_time_raw = shift.get("start_time")
+        start_dt = parse_iso_or_datetime(start_time_raw)
+        
+        start_clock = get_discord_timestamp(start_dt, "T") if start_dt else "Bilinmiyor"
+        start_rel = get_discord_timestamp(start_dt, "R") if start_dt else "Bilinmiyor"
+
+        # Geçen tahmini süre
+        if start_dt:
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.replace(tzinfo=timezone.utc)
+            elapsed_sec = max(0, int((datetime.now(timezone.utc) - start_dt).total_seconds()))
+            elapsed_text = format_duration(elapsed_sec)
+        else:
+            elapsed_text = "Hesaplanıyor"
+
+        field_value = (
+            f"👤 **Personel:** <@{user_id}> (`{user_name}`)\n"
+            f"🕒 **Başlangıç:** {start_clock} ({start_rel})\n"
+            f"⌛ **Aktif Süre:** `{elapsed_text}`"
+        )
+        embed.add_field(
+            name=f"🟢 {idx}. {user_name}",
+            value=field_value,
+            inline=False
+        )
+
+    embed.set_footer(text=f"Lucas2 Canlı Takip • Toplam {len(active_shifts)} Personel Aktif")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
+def create_leaderboard_embed(reports: List[Dict[str, Any]], guild: Optional[discord.Guild] = None) -> discord.Embed:
+    """#mesai-tablo kanalı için sıralı liderlik ve genel istatistik tablosu."""
+    embed = discord.Embed(
+        title="🏆 PERSONEL GENEL MESAİ TABLOSU & İSTATİSTİKLERİ",
+        description="Sunucumuzdaki personellerin kayıtlı toplam çalışma süreleri ve performans sıralaması:\n",
+        color=0xF1C40F  # Gold
     )
 
     if not reports:
-        embed.description += "\n*Henüz sisteme kaydedilmiş tamamlanmış bir mesai verisi bulunmamaktadır.*"
-        embed.set_footer(text="Lucas2 Mesai Sistemi")
+        embed.description += "\n*Henüz sisteme kaydedilmiş tamamlanmış bir mesai kaydı bulunmamaktadır.*"
+        embed.set_footer(text="Lucas2 Mesai Tablosu • Düzenli Olarak Güncellenir")
+        embed.timestamp = datetime.now(timezone.utc)
         return embed
 
-    lines = []
     total_guild_seconds = 0
     total_guild_shifts = 0
+    lines = []
+
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
 
     for idx, row in enumerate(reports, 1):
         user_id = row.get("user_id")
@@ -183,71 +241,135 @@ def create_admin_report_embed(reports: List[Dict[str, Any]], guild: Optional[dis
         total_guild_seconds += total_seconds
         total_guild_shifts += shift_count
 
+        badge = medals.get(idx, f"`{idx}.`")
         last_active_text = get_discord_timestamp(last_active, "R") if last_active else "Kayıt yok"
-        user_mention = f"<@{user_id}>"
 
         lines.append(
-            f"**{idx}. {user_mention}** (`{user_name}`)\n"
-            f"   • Toplam Süre: **{format_duration(total_seconds)}**\n"
-            f"   • Oturum Sayısı: **{shift_count}** adet | Son Aktif: {last_active_text}"
+            f"{badge} **<@{user_id}>** (`{user_name}`)\n"
+            f"   ⏱️ Toplam Süre: **{format_duration(total_seconds)}**\n"
+            f"   📊 Oturum: **{shift_count}** adet | Son Aktif: {last_active_text}"
         )
 
-    # Discord embed limitlerine göre bölme (her alanda max 1024 karakter)
+    # Embed karakter limitlerine göre parçalama
     chunk = ""
     field_count = 1
     for line in lines:
         if len(chunk) + len(line) + 2 > 1000:
-            embed.add_field(name=f"👥 Personel Listesi (Bölüm {field_count})", value=chunk, inline=False)
-            chunk = line + "\n"
+            embed.add_field(name=f"📋 Sıralama Tablosu (Sayfa {field_count})", value=chunk, inline=False)
+            chunk = line + "\n\n"
             field_count += 1
         else:
-            chunk += line + "\n"
+            chunk += line + "\n\n"
 
     if chunk:
-        name_title = "👥 Personel Listesi" if field_count == 1 else f"👥 Personel Listesi (Bölüm {field_count})"
-        embed.add_field(name=name_title, value=chunk, inline=False)
+        title_name = "📋 Sıralama Tablosu" if field_count == 1 else f"📋 Sıralama Tablosu (Sayfa {field_count})"
+        embed.add_field(name=title_name, value=chunk, inline=False)
 
-    # Genel toplam istatistikleri
+    # Genel İstatistikler Kutusu
     embed.add_field(
-        name="🌐 Genel Sunucu Toplamları",
+        name="🌐 Genel Sunucu Toplam İstatistikleri",
         value=(
-            f"• Toplam Personel Sayısı: **{len(reports)}**\n"
-            f"• Toplam Tamamlanan Oturum: **{total_guild_shifts}**\n"
-            f"• Toplam Birikmiş Mesai Süresi: **{format_duration(total_guild_seconds)}**"
+            f"👥 **Toplam Kayıtlı Personel:** `{len(reports)}` kişi\n"
+            f"📈 **Toplam Tamamlanan Oturum:** `{total_guild_shifts}` oturum\n"
+            f"⏳ **Genel Birikmiş Çalışma Süresi:** `{format_duration(total_guild_seconds)}`"
         ),
         inline=False
     )
-    embed.set_footer(text=f"Rapor Oluşturulma Tarihi • Toplam {len(reports)} personel")
+
+    embed.set_footer(text=f"Lucas2 Mesai Tablosu • Toplam {len(reports)} Personel")
     embed.timestamp = datetime.now(timezone.utc)
     return embed
+
+def create_admin_report_embed(reports: List[Dict[str, Any]], guild: Optional[discord.Guild] = None) -> discord.Embed:
+    """Tüm personellerin mesai sürelerini listeleyen yönetici rapor embedi."""
+    return create_leaderboard_embed(reports, guild)
 
 def create_active_shifts_embed(active_shifts: List[Dict[str, Any]]) -> discord.Embed:
     """Anlık olarak mesaisi devam eden personelleri listeleyen embed."""
+    return create_live_active_shifts_embed(active_shifts)
+
+def create_afk_prompt_embed(
+    user: discord.User | discord.Member,
+    minutes_active: int = 45,
+    timeout_minutes: int = 5
+) -> discord.Embed:
+    """Kullanıcıya 45 dakika dolduğunda iletilen aktiflik doğrulama embedi."""
     embed = discord.Embed(
-        title="🟢 ANLIK AKTİF MESAİDEKİ PERSONELLER",
-        color=0x2ECC71
+        title="⚠️ MESAİ AKTİFLİK DOĞRULAMASI",
+        description=(
+            f"Sayın **{user.display_name}**,\n\n"
+            f"Mesainiz **{minutes_active} dakikadır** kesintisiz olarak devam etmektedir.\n"
+            f"Görevinizin başında aktif olduğunuzu teyit etmek için lütfen aşağıdaki butona tıklayınız.\n\n"
+            f"⏳ **Yanıt Süreniz:** **{timeout_minutes} dakika**\n"
+            f"📌 *Belirtilen süre içerisinde doğrulama yapmazsanız mesainiz AFK sebebiyle otomatik olarak sonlandırılacaktır.*"
+        ),
+        color=0xE67E22  # Orange
     )
-
-    if not active_shifts:
-        embed.description = "Şu anda aktif mesaisi devam eden **hiçbir personel bulunmamaktadır**."
-        embed.set_footer(text="Lucas2 Mesai Takip")
-        return embed
-
-    embed.description = f"Şu anda toplam **{len(active_shifts)}** personel aktif görevdedir:\n"
-
-    for idx, shift in enumerate(active_shifts, 1):
-        user_id = shift.get("user_id")
-        user_name = shift.get("user_name", "Bilinmiyor")
-        start_time = shift.get("start_time")
-        start_ts = get_discord_timestamp(start_time, "R")
-        start_clock = get_discord_timestamp(start_time, "T")
-
-        embed.add_field(
-            name=f"{idx}. {user_name}",
-            value=f"• Kullanıcı: <@{user_id}>\n• Başlangıç: {start_clock} ({start_ts})",
-            inline=True
-        )
-
-    embed.set_footer(text="Canlı Durum Sorgusu")
+    embed.set_footer(text="Lucas2 Aktiflik & Güvenlik Doğrulama Sistemi")
     embed.timestamp = datetime.now(timezone.utc)
     return embed
+
+def create_afk_verified_embed(user: discord.User | discord.Member) -> discord.Embed:
+    """Kullanıcı aktiflik doğrulama butonuna bastığında gösterilen onay embedi."""
+    embed = discord.Embed(
+        title="✅ Aktiflik Başarıyla Doğrulandı!",
+        description=f"Teşekkürler **{user.display_name}**! Aktifliğiniz onaylandı ve mesainiz devam ediyor.\n\n*İyi çalışmalar ve kolaylıklar dileriz.*",
+        color=0x2ECC71  # Green
+    )
+    embed.set_footer(text="Lucas2 Mesai Takip")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
+def create_afk_timeout_embed(
+    user: discord.User | discord.Member,
+    duration_seconds: int,
+    timeout_minutes: int = 5
+) -> discord.Embed:
+    """Zaman aşımına uğrayıp kapatılan mesai bildirim embedi."""
+    embed = discord.Embed(
+        title="🛑 Mesainiz AFK Nedeniyle Kapatıldı",
+        description=(
+            f"Sayın **{user.display_name}**,\n\n"
+            f"**{timeout_minutes} dakika** içinde aktiflik doğrulamasına yanıt verilmediği için mesainiz **AFK / Zaman Aşımı** gerekçesiyle otomatik olarak sonlandırılmıştır.\n\n"
+            f"⌛ **Kaydedilen Toplam Süre:** **{format_duration(duration_seconds)}**\n\n"
+            f"📌 *Tekrar göreve başladığınızda lütfen mesai kanalından yeni bir oturum başlatınız.*"
+        ),
+        color=0xE74C3C  # Danger Red
+    )
+    embed.set_footer(text="Lucas2 Otomatik Güvenlik & AFK Sistemi")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
+def create_log_embed(
+    action_type: str,
+    user: discord.User | discord.Member,
+    details: Dict[str, Any]
+) -> discord.Embed:
+    """Log kanalı için detaylı denetim kayıt embedi."""
+    colors = {
+        "START": 0x2ECC71,       # Yeşil
+        "END": 0x3498DB,         # Mavi
+        "AFK_TIMEOUT": 0xE74C3C, # Kırmızı
+        "FORCE_CLOSED": 0xE67E22 # Turuncu
+    }
+    
+    titles = {
+        "START": "🟢 Mesai Başlatıldı",
+        "END": "🔴 Mesai Sonlandırıldı",
+        "AFK_TIMEOUT": "⚠️ Mesai AFK Zaman Aşımı ile Kapatıldı",
+        "FORCE_CLOSED": "👮 Mesai Yönetici Tarafından Kapatıldı"
+    }
+
+    embed = discord.Embed(
+        title=titles.get(action_type, f"📋 Mesai İşlemi: {action_type}"),
+        color=colors.get(action_type, 0x5865F2)
+    )
+    embed.add_field(name="👤 Personel", value=f"{user.mention} (`{user.display_name}` - ID: `{user.id}`)", inline=False)
+    
+    for key, value in details.items():
+        embed.add_field(name=key, value=str(value), inline=True)
+
+    embed.set_footer(text="Lucas2 Mesai Denetim Günlüğü")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+

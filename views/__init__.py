@@ -1,5 +1,7 @@
 """Discord UI View bileşenleri paketi."""
 from .shift_view import ShiftView
 from .admin_view import AdminView
+from .afk_view import AFKVerificationView
 
-__all__ = ["ShiftView", "AdminView"]
+__all__ = ["ShiftView", "AdminView", "AFKVerificationView"]
+

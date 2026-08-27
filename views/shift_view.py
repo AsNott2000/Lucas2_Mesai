@@ -1,13 +1,19 @@
+import logging
 import discord
 from datetime import datetime, timezone
 from database import db
+from services.panel_manager import panel_manager
 from utils.formatters import (
     create_shift_started_embed,
     create_shift_ended_embed,
     create_warning_embed,
     create_error_embed,
+    create_log_embed,
+    format_duration,
     get_discord_timestamp,
 )
+
+logger = logging.getLogger("Lucas2MesaiBot.ShiftView")
 
 class ShiftView(discord.ui.View):
     """
@@ -27,8 +33,8 @@ class ShiftView(discord.ui.View):
     )
     async def start_shift_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Kullanıcının mesaisini başlatan buton aksiyonu."""
-        guild_id = interaction.guild_id
-        if not guild_id:
+        guild = interaction.guild
+        if not guild:
             await interaction.response.send_message(
                 embed=create_error_embed("Hata", "Bu buton yalnızca bir sunucu içerisinde kullanılabilir."),
                 ephemeral=True
@@ -39,7 +45,7 @@ class ShiftView(discord.ui.View):
         now = datetime.now(timezone.utc)
 
         success, shift_data, message = await db.start_shift(
-            guild_id=guild_id,
+            guild_id=guild.id,
             user_id=user.id,
             user_name=user.display_name,
             start_time=now
@@ -48,6 +54,18 @@ class ShiftView(discord.ui.View):
         if success:
             embed = create_shift_started_embed(user=user, start_time=now)
             await interaction.response.send_message(embed=embed, ephemeral=True)
+
+            # Canlı Panelleri ve Logları Güncelle
+            await panel_manager.update_active_shifts_panel(guild)
+            log_embed = create_log_embed(
+                action_type="START",
+                user=user,
+                details={
+                    "🕒 Başlangıç": f"<t:{int(now.timestamp())}:T>",
+                    "📅 Tarih": f"<t:{int(now.timestamp())}:D>"
+                }
+            )
+            await panel_manager.send_audit_log(guild, log_embed)
         else:
             # Zaten aktif mesaisi var
             start_time_raw = shift_data.get("start_time") if shift_data else None
@@ -66,8 +84,8 @@ class ShiftView(discord.ui.View):
     )
     async def end_shift_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Kullanıcının aktif mesaisini bitiren buton aksiyonu."""
-        guild_id = interaction.guild_id
-        if not guild_id:
+        guild = interaction.guild
+        if not guild:
             await interaction.response.send_message(
                 embed=create_error_embed("Hata", "Bu buton yalnızca bir sunucu içerisinde kullanılabilir."),
                 ephemeral=True
@@ -78,7 +96,7 @@ class ShiftView(discord.ui.View):
         now = datetime.now(timezone.utc)
 
         success, result_data, message = await db.end_shift(
-            guild_id=guild_id,
+            guild_id=guild.id,
             user_id=user.id,
             end_time=now
         )
@@ -93,6 +111,25 @@ class ShiftView(discord.ui.View):
                 total_lifetime_seconds=result_data["total_lifetime_seconds"],
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
+
+            # Canlı Panelleri ve Tabloyu Güncelle
+            await panel_manager.update_all_panels(guild)
+
+            # Kanal Temizliğini Tetikle (#mesai kanalı için)
+            if isinstance(interaction.channel, discord.TextChannel):
+                await panel_manager.cleanup_mesai_channel(interaction.channel)
+
+            # Denetim Logunu Gönder
+            log_embed = create_log_embed(
+                action_type="END",
+                user=user,
+                details={
+                    "⌛ Oturum Süresi": format_duration(result_data["duration_seconds"]),
+                    "🏆 Genel Toplam": format_duration(result_data["total_lifetime_seconds"]),
+                    "📈 Oturum Sayısı": f"{result_data['total_completed_shifts']} adet"
+                }
+            )
+            await panel_manager.send_audit_log(guild, log_embed)
         else:
             # Açık mesaisi yok
             embed = create_error_embed(
@@ -100,3 +137,4 @@ class ShiftView(discord.ui.View):
                 message="Şu anda aktif veya devam eden bir mesai kaydınız bulunmuyor.\nÖnce **'Mesai Başlat'** butonuna basarak yeni bir mesai başlatabilirsiniz."
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
+
