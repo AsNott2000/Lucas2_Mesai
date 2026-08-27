@@ -69,5 +69,14 @@ class TestTrackerAndPanels(unittest.TestCase):
         self.assertIn("AFK", log.title)
         self.assertEqual(len(log.fields), 3)
 
+        # Toplu kapatma log testi
+        log_all = create_log_embed(
+            action_type="FORCE_CLOSED_ALL",
+            user=MockUser(),
+            details={"Kapatılan Sayısı": "5 kişi"}
+        )
+        self.assertIn("Tüm Mesailer", log_all.title)
+        self.assertEqual(len(log_all.fields), 2)
+
 if __name__ == "__main__":
     unittest.main()

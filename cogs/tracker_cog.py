@@ -36,17 +36,17 @@ class TrackerCog(commands.Cog):
     def cog_unload(self):
         self.tracker_loop.cancel()
 
-    @tasks.loop(seconds=30)
+    @tasks.loop(seconds=15)
     async def tracker_loop(self):
-        """Her 30 saniyede bir çalışan ana arka plan denetleyicisi."""
+        """Her 15 saniyede bir çalışan ana arka plan denetleyicisi."""
         self._loop_counter += 1
         now = datetime.now(timezone.utc)
 
         try:
             active_shifts = await db.get_all_active_shifts_global()
             if not active_shifts:
-                # Aktif mesai yoksa ama periyodik güncelleme sırası geldiyse (her 2 dakikada bir)
-                if self._loop_counter % 4 == 0:
+                # Aktif mesai yoksa ama periyodik güncelleme sırası geldiyse (her 2 dakikada bir = 8 döngü)
+                if self._loop_counter % 8 == 0:
                     for guild in self.bot.guilds:
                         await panel_manager.update_active_shifts_panel(guild)
                 return
@@ -88,19 +88,19 @@ class TrackerCog(commands.Cog):
                     if elapsed_since_verified >= afk_interval_sec:
                         await self._send_afk_verification_prompt(guild, member, user_id, now)
 
-                # DURUM 2: Doğrulama mesajı gönderilmiş ve bekleme süresi (5 dk) aşılmış
+                # DURUM 2: Doğrulama mesajı gönderilmiş ve bekleme süresi (1 dk) aşılmış
                 else:
                     elapsed_since_prompt = (now - verification_sent_dt).total_seconds()
                     if elapsed_since_prompt >= timeout_sec:
                         await self._handle_afk_timeout(guild, member, user_id, now)
 
-            # Her 1 dakikada bir (2 döngüde bir) canlı panelleri güncelle
-            if self._loop_counter % 2 == 0:
+            # Her 1 dakikada bir (4 döngüde bir) canlı panelleri güncelle
+            if self._loop_counter % 4 == 0:
                 for guild in self.bot.guilds:
                     await panel_manager.update_active_shifts_panel(guild)
 
-            # Her 5 dakikada bir (10 döngüde bir) genel tabloyu güncelle
-            if self._loop_counter % 10 == 0:
+            # Her 5 dakikada bir (20 döngüde bir) genel tabloyu güncelle
+            if self._loop_counter % 20 == 0:
                 for guild in self.bot.guilds:
                     await panel_manager.update_leaderboard_panel(guild)
 
@@ -155,8 +155,9 @@ class TrackerCog(commands.Cog):
             )
             if mesai_ch:
                 try:
+                    timeout_label = f"{config.AFK_TIMEOUT_MINUTES} dakika (60 saniye)" if config.AFK_TIMEOUT_MINUTES == 1 else f"{config.AFK_TIMEOUT_MINUTES} dakika"
                     await mesai_ch.send(
-                        content=f"⚠️ {member.mention} **Mesai Doğrulaması:** DM kutunuz kapalı olduğu için buraya iletildi! Lütfen 5 dakika içinde onaylayınız:",
+                        content=f"⚠️ {member.mention} **Mesai Doğrulaması:** DM kutunuz kapalı olduğu için buraya iletildi! Lütfen {timeout_label} içinde onaylayınız (Aksi halde son 45 dakikanız silinecektir):",
                         embed=embed,
                         view=view,
                         delete_after=config.AFK_TIMEOUT_MINUTES * 60
@@ -167,21 +168,26 @@ class TrackerCog(commands.Cog):
     async def _handle_afk_timeout(
         self, guild: discord.Guild, member: Optional[discord.Member], user_id: int, now: datetime
     ):
-        """Doğrulama yapmayan personelin mesaisini otomatik kapatır ve loglar."""
+        """Doğrulama yapmayan personelin mesaisini otomatik kapatır, son 45 dakikayı siler ve loglar."""
         success, result_data, msg = await db.end_shift_afk(
             guild_id=guild.id,
             user_id=user_id,
             end_time=now,
-            note=f"{config.AFK_CHECK_INTERVAL_MINUTES} dakikalık aktiflik doğrulaması ({config.AFK_TIMEOUT_MINUTES} dk içinde) yanıtlanmadığı için otomatik sonlandırıldı."
+            note="AFK - Doğrulama Yapılmadı (45 dk düşüldü)"
         )
 
         if not success or not result_data:
             return
 
         duration_sec = result_data["duration_seconds"]
+        raw_duration_sec = result_data.get("raw_duration_seconds", duration_sec)
+        deducted_sec = result_data.get("deducted_seconds", 0)
         user_name = result_data.get("user_name", str(user_id))
 
-        logger.info(f"Personel {user_name} (ID: {user_id}) AFK zaman aşımı nedeniyle mesaisi kapatıldı (Süre: {duration_sec} sn).")
+        logger.info(
+            f"Personel {user_name} (ID: {user_id}) AFK zaman aşımı nedeniyle mesaisi kapatıldı "
+            f"(Ham: {raw_duration_sec} sn, Düşülen: {deducted_sec} sn, Net: {duration_sec} sn)."
+        )
 
         user_obj = member
         if not user_obj:
@@ -196,6 +202,8 @@ class TrackerCog(commands.Cog):
                 timeout_embed = create_afk_timeout_embed(
                     user=user_obj,
                     duration_seconds=duration_sec,
+                    raw_duration_seconds=raw_duration_sec,
+                    deducted_seconds=deducted_sec,
                     timeout_minutes=config.AFK_TIMEOUT_MINUTES
                 )
                 await user_obj.send(embed=timeout_embed)
@@ -208,8 +216,10 @@ class TrackerCog(commands.Cog):
                 action_type="AFK_TIMEOUT",
                 user=user_obj,
                 details={
-                    "⌛ Kaydedilen Süre": format_duration(duration_sec),
-                    "⚠️ Kapatma Nedeni": f"{config.AFK_CHECK_INTERVAL_MINUTES} Dk Doğrulama Yanıtlanmadı",
+                    "⏱️ Ham Oturum Süresi": format_duration(raw_duration_sec),
+                    "⚠️ Uygulanan Ceza": f"-{format_duration(deducted_sec)} (45 dk silindi)",
+                    "⌛ Kaydedilen Net Süre": format_duration(duration_sec),
+                    "📌 Kapatma Nedeni": "AFK - Doğrulama Yapılmadı (45 dk düşüldü)",
                     "🕒 Kapatılma Zamanı": f"<t:{int(now.timestamp())}:F>"
                 }
             )

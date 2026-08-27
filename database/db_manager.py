@@ -231,6 +231,8 @@ class DatabaseManager:
     ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
         """
         AFK doğrulama süresi aşımı nedeniyle mesaiyi otomatik sonlandırır.
+        Son 45 dakikalık dilim mesai süresinden silinir/düşülür.
+        Toplam süre 45 dakikadan az ise oturum süresi 0 sn (geçersiz) olarak kayda geçer.
         """
         if end_time is None:
             end_time = datetime.now(timezone.utc)
@@ -248,8 +250,11 @@ class DatabaseManager:
             if start_dt.tzinfo is None:
                 start_dt = start_dt.replace(tzinfo=timezone.utc)
 
-            duration_seconds = max(0, int((end_time - start_dt).total_seconds()))
-            note_text = note or "45 dakikalık AFK / Doğrulama zaman aşımı nedeniyle otomatik sonlandırıldı."
+            raw_duration_seconds = max(0, int((end_time - start_dt).total_seconds()))
+            penalty_seconds = config.AFK_CHECK_INTERVAL_MINUTES * 60  # 45 * 60 = 2700 sn
+            final_duration_seconds = max(0, raw_duration_seconds - penalty_seconds)
+            deducted_seconds = min(raw_duration_seconds, penalty_seconds)
+            note_text = note or "AFK - Doğrulama Yapılmadı (45 dk düşüldü)"
 
             async with aiosqlite.connect(self.db_path) as conn:
                 conn.row_factory = aiosqlite.Row
@@ -259,7 +264,7 @@ class DatabaseManager:
                     SET end_time = ?, duration_seconds = ?, status = 'AFK_CLOSED', note = ?
                     WHERE id = ?
                     """,
-                    (end_time.isoformat(), duration_seconds, note_text, shift_id)
+                    (end_time.isoformat(), final_duration_seconds, note_text, shift_id)
                 )
                 await conn.commit()
 
@@ -274,7 +279,7 @@ class DatabaseManager:
                 ) as cur_stats:
                     stats_row = await cur_stats.fetchone()
                     total_shifts = stats_row["total_shifts"] if stats_row else 1
-                    total_seconds = stats_row["total_seconds"] if stats_row else duration_seconds
+                    total_seconds = stats_row["total_seconds"] if stats_row else final_duration_seconds
 
                 result_data = {
                     "id": shift_id,
@@ -283,11 +288,14 @@ class DatabaseManager:
                     "user_name": active["user_name"],
                     "start_time": start_dt,
                     "end_time": end_time,
-                    "duration_seconds": duration_seconds,
+                    "raw_duration_seconds": raw_duration_seconds,
+                    "deducted_seconds": deducted_seconds,
+                    "duration_seconds": final_duration_seconds,
+                    "penalty_applied": True,
                     "total_completed_shifts": total_shifts,
                     "total_lifetime_seconds": total_seconds,
                 }
-                return True, result_data, "Mesai AFK zaman aşımı nedeniyle sonlandırıldı."
+                return True, result_data, "Mesai AFK zaman aşımı ve ceza uygulanarak sonlandırıldı."
 
     async def update_last_verified(
         self, guild_id: int, user_id: int, verified_at: Optional[datetime] = None
@@ -445,6 +453,61 @@ class DatabaseManager:
                 "start_time": start_dt,
                 "end_time": now
             }, f"Mesai yönetici {admin_name} tarafından sonlandırıldı."
+
+    async def force_end_all_shifts(
+        self, guild_id: int, admin_name: str
+    ) -> Tuple[int, List[Dict[str, Any]]]:
+        """
+        Sunucudaki tüm aktif mesaileri anlık zaman damgasıyla toplu olarak sonlandırır.
+        Kapatılan mesai sayısını ve kapatılan oturumların özet listesini döner.
+        """
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+        closed_records: List[Dict[str, Any]] = []
+
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as conn:
+                conn.row_factory = aiosqlite.Row
+                async with conn.execute(
+                    "SELECT * FROM shifts WHERE guild_id = ? AND status = 'ACTIVE' ORDER BY id ASC",
+                    (guild_id,)
+                ) as cursor:
+                    active_rows = await cursor.fetchall()
+
+                if not active_rows:
+                    return 0, []
+
+                for row in active_rows:
+                    shift_id = row["id"]
+                    start_time_str = row["start_time"]
+                    start_dt = datetime.fromisoformat(start_time_str)
+                    if start_dt.tzinfo is None:
+                        start_dt = start_dt.replace(tzinfo=timezone.utc)
+
+                    duration_seconds = max(0, int((now - start_dt).total_seconds()))
+                    note = f"Yönetici ({admin_name}) tarafından toplu kapatıldı."
+
+                    await conn.execute(
+                        """
+                        UPDATE shifts 
+                        SET end_time = ?, duration_seconds = ?, status = 'FORCE_CLOSED', note = ?
+                        WHERE id = ?
+                        """,
+                        (now_iso, duration_seconds, note, shift_id)
+                    )
+
+                    closed_records.append({
+                        "id": shift_id,
+                        "user_id": row["user_id"],
+                        "user_name": row["user_name"],
+                        "start_time": start_dt,
+                        "end_time": now,
+                        "duration_seconds": duration_seconds,
+                    })
+
+                await conn.commit()
+
+            return len(closed_records), closed_records
 
 # Singleton veritabanı nesnesi
 db = DatabaseManager()

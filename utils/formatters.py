@@ -80,6 +80,7 @@ def create_admin_panel_embed() -> discord.Embed:
             "Bu panel yalnızca yetkili yöneticilerin kullanımı içindir.\n\n"
             "📊 **Genel Rapor Al:** Tüm personellerin toplam mesai sürelerini ve oturum sayılarını listeler.\n"
             "🟢 **Anlık Aktif Mesailer:** Şu anda mesaisi devam eden personelleri gösterir.\n"
+            "🛑 **Tüm Mesaileri Kapat:** Açık olan tüm kullanıcı mesailerini anında sonlandırır.\n"
         ),
         color=0x2B2D31  # Koyu Gri / Dark Slate
     )
@@ -291,17 +292,20 @@ def create_active_shifts_embed(active_shifts: List[Dict[str, Any]]) -> discord.E
 def create_afk_prompt_embed(
     user: discord.User | discord.Member,
     minutes_active: int = 45,
-    timeout_minutes: int = 5
+    timeout_minutes: int = 1
 ) -> discord.Embed:
     """Kullanıcıya 45 dakika dolduğunda iletilen aktiflik doğrulama embedi."""
+    timeout_text = f"{timeout_minutes} dakika (60 saniye)" if timeout_minutes == 1 else f"{timeout_minutes} dakika"
     embed = discord.Embed(
         title="⚠️ MESAİ AKTİFLİK DOĞRULAMASI",
         description=(
             f"Sayın **{user.display_name}**,\n\n"
             f"Mesainiz **{minutes_active} dakikadır** kesintisiz olarak devam etmektedir.\n"
             f"Görevinizin başında aktif olduğunuzu teyit etmek için lütfen aşağıdaki butona tıklayınız.\n\n"
-            f"⏳ **Yanıt Süreniz:** **{timeout_minutes} dakika**\n"
-            f"📌 *Belirtilen süre içerisinde doğrulama yapmazsanız mesainiz AFK sebebiyle otomatik olarak sonlandırılacaktır.*"
+            f"⏳ **Yanıt Süreniz:** **{timeout_text}**\n\n"
+            f"⚠️ **ÖNEMLİ CEZA KURALI:**\n"
+            f"• Belirtilen süre içerisinde doğrulama yapmazsanız mesainiz otomatik olarak kapatılır.\n"
+            f"• Oturumunuzdan **son {minutes_active} dakikalık süre silinir/düşülür** (Toplam süre {minutes_active} dk altındaysa oturum geçersiz sayılır)."
         ),
         color=0xE67E22  # Orange
     )
@@ -323,48 +327,65 @@ def create_afk_verified_embed(user: discord.User | discord.Member) -> discord.Em
 def create_afk_timeout_embed(
     user: discord.User | discord.Member,
     duration_seconds: int,
-    timeout_minutes: int = 5
+    raw_duration_seconds: Optional[int] = None,
+    deducted_seconds: Optional[int] = None,
+    timeout_minutes: int = 1
 ) -> discord.Embed:
     """Zaman aşımına uğrayıp kapatılan mesai bildirim embedi."""
+    timeout_text = f"{timeout_minutes} dakika (60 saniye)" if timeout_minutes == 1 else f"{timeout_minutes} dakika"
+    
+    desc_lines = [
+        f"Sayın **{user.display_name}**,\n",
+        f"**{timeout_text}** içinde aktiflik doğrulamasına yanıt verilmediği için mesainiz **AFK / Zaman Aşımı** gerekçesiyle otomatik olarak sonlandırılmıştır.\n",
+    ]
+
+    if raw_duration_seconds is not None and deducted_seconds is not None:
+        desc_lines.append(f"⏱️ **Ham Oturum Süresi:** `{format_duration(raw_duration_seconds)}`")
+        desc_lines.append(f"⚠️ **Uygulanan Ceza:** `-{format_duration(deducted_seconds)}` (Son 45 dk silindi)")
+        desc_lines.append(f"⌛ **Kayda Geçen Net Süre:** **{format_duration(duration_seconds)}**\n")
+    else:
+        desc_lines.append(f"⌛ **Kaydedilen Toplam Süre:** **{format_duration(duration_seconds)}**\n")
+
+    desc_lines.append("📌 *Tekrar göreve başladığınızda lütfen mesai kanalından yeni bir oturum başlatınız.*")
+
     embed = discord.Embed(
         title="🛑 Mesainiz AFK Nedeniyle Kapatıldı",
-        description=(
-            f"Sayın **{user.display_name}**,\n\n"
-            f"**{timeout_minutes} dakika** içinde aktiflik doğrulamasına yanıt verilmediği için mesainiz **AFK / Zaman Aşımı** gerekçesiyle otomatik olarak sonlandırılmıştır.\n\n"
-            f"⌛ **Kaydedilen Toplam Süre:** **{format_duration(duration_seconds)}**\n\n"
-            f"📌 *Tekrar göreve başladığınızda lütfen mesai kanalından yeni bir oturum başlatınız.*"
-        ),
+        description="\n".join(desc_lines),
         color=0xE74C3C  # Danger Red
     )
-    embed.set_footer(text="Lucas2 Otomatik Güvenlik & AFK Sistemi")
+    embed.set_footer(text="Lucas2 Otomatik Güvenlik & AFK Sistemi • Ceza Uygulandı")
     embed.timestamp = datetime.now(timezone.utc)
     return embed
 
 def create_log_embed(
     action_type: str,
-    user: discord.User | discord.Member,
-    details: Dict[str, Any]
+    user: Optional[discord.User | discord.Member] = None,
+    details: Optional[Dict[str, Any]] = None
 ) -> discord.Embed:
     """Log kanalı için detaylı denetim kayıt embedi."""
+    details = details or {}
     colors = {
-        "START": 0x2ECC71,       # Yeşil
-        "END": 0x3498DB,         # Mavi
-        "AFK_TIMEOUT": 0xE74C3C, # Kırmızı
-        "FORCE_CLOSED": 0xE67E22 # Turuncu
+        "START": 0x2ECC71,             # Yeşil
+        "END": 0x3498DB,               # Mavi
+        "AFK_TIMEOUT": 0xE74C3C,       # Kırmızı
+        "FORCE_CLOSED": 0xE67E22,      # Turuncu
+        "FORCE_CLOSED_ALL": 0x992D22,  # Koyu Kırmızı
     }
     
     titles = {
         "START": "🟢 Mesai Başlatıldı",
         "END": "🔴 Mesai Sonlandırıldı",
-        "AFK_TIMEOUT": "⚠️ Mesai AFK Zaman Aşımı ile Kapatıldı",
-        "FORCE_CLOSED": "👮 Mesai Yönetici Tarafından Kapatıldı"
+        "AFK_TIMEOUT": "⚠️ Mesai AFK Zaman Aşımı & Ceza ile Kapatıldı",
+        "FORCE_CLOSED": "👮 Mesai Yönetici Tarafından Kapatıldı",
+        "FORCE_CLOSED_ALL": "🛑 Tüm Mesailer Yönetici Tarafından Kapatıldı",
     }
 
     embed = discord.Embed(
         title=titles.get(action_type, f"📋 Mesai İşlemi: {action_type}"),
         color=colors.get(action_type, 0x5865F2)
     )
-    embed.add_field(name="👤 Personel", value=f"{user.mention} (`{user.display_name}` - ID: `{user.id}`)", inline=False)
+    if user:
+        embed.add_field(name="👤 Personel", value=f"{user.mention} (`{user.display_name}` - ID: `{user.id}`)", inline=False)
     
     for key, value in details.items():
         embed.add_field(name=key, value=str(value), inline=True)

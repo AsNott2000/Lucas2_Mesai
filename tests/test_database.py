@@ -170,6 +170,72 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(stats["total_duration"], 0)
         self.assertFalse(stats["is_active"])
 
+    async def test_force_end_all_shifts(self):
+        """Yönetici tarafından sunucudaki tüm aktif mesaileri toplu kapatma testi."""
+        guild_id = 6666
+        u1, u2, u3 = 601, 602, 603
+        t0 = datetime(2026, 8, 27, 10, 0, 0, tzinfo=timezone.utc)
+
+        # 3 kullanıcı için aktif mesai başlat
+        await self.db.start_shift(guild_id, u1, "User1", t0)
+        await self.db.start_shift(guild_id, u2, "User2", t0 + timedelta(minutes=15))
+        await self.db.start_shift(guild_id, u3, "User3", t0 + timedelta(minutes=30))
+
+        active_before = await self.db.get_all_active_shifts(guild_id)
+        self.assertEqual(len(active_before), 3)
+
+        # Toplu kapat
+        count, closed_records = await self.db.force_end_all_shifts(guild_id, "SuperAdmin")
+        self.assertEqual(count, 3)
+        self.assertEqual(len(closed_records), 3)
+
+        # Artık aktif mesai kalmamış olmalı
+        active_after = await self.db.get_all_active_shifts(guild_id)
+        self.assertEqual(len(active_after), 0)
+
+        # Raporları kontrol et
+        reports = await self.db.get_guild_report(guild_id)
+        self.assertEqual(len(reports), 3)
+
+        # Boş sunucuda toplu kapatma testi (0 dönmeli)
+        count_empty, closed_empty = await self.db.force_end_all_shifts(guild_id, "SuperAdmin")
+        self.assertEqual(count_empty, 0)
+        self.assertEqual(len(closed_empty), 0)
+
+    async def test_afk_penalty_deduction(self):
+        """AFK zaman aşımında son 45 dakikanın düşülmesi ve sınır durumların testi."""
+        guild_id = 5555
+        u_long = 501  # 2 saatlik oturum
+        u_short = 502 # 30 dakikalık oturum
+        t0 = datetime(2026, 8, 27, 8, 0, 0, tzinfo=timezone.utc)
+
+        # 1. Durum: 2 saat (120 dk) çalışan personel -> 45 dk düşülüp 1 saat 15 dk (75 dk = 4500 sn) olmalı
+        await self.db.start_shift(guild_id, u_long, "LongWorker", t0)
+        end_time_long = t0 + timedelta(hours=2)
+        success_long, res_long, msg_long = await self.db.end_shift_afk(guild_id, u_long, end_time_long)
+        self.assertTrue(success_long)
+        self.assertEqual(res_long["raw_duration_seconds"], 2 * 3600)  # 7200 sn
+        self.assertEqual(res_long["deducted_seconds"], 45 * 60)       # 2700 sn
+        self.assertEqual(res_long["duration_seconds"], 75 * 60)       # 4500 sn (1 sa 15 dk)
+
+        # 2. Durum: 30 dakika çalışan personel (45 dk'dan az) -> Oturum 0 sn (geçersiz) olmalı
+        await self.db.start_shift(guild_id, u_short, "ShortWorker", t0)
+        end_time_short = t0 + timedelta(minutes=30)
+        success_short, res_short, msg_short = await self.db.end_shift_afk(guild_id, u_short, end_time_short)
+        self.assertTrue(success_short)
+        self.assertEqual(res_short["raw_duration_seconds"], 30 * 60)  # 1800 sn
+        self.assertEqual(res_short["deducted_seconds"], 30 * 60)      # 1800 sn (en fazla ham süre kadar düşülebilir)
+        self.assertEqual(res_short["duration_seconds"], 0)            # 0 sn
+
+        # İstatistik kontrolü
+        stats_long = await self.db.get_user_stats(guild_id, u_long)
+        self.assertEqual(stats_long["total_duration"], 4500)
+        self.assertEqual(stats_long["total_shifts"], 1)
+
+        stats_short = await self.db.get_user_stats(guild_id, u_short)
+        self.assertEqual(stats_short["total_duration"], 0)
+        self.assertEqual(stats_short["total_shifts"], 1)
+
     def test_duration_formatter(self):
         """Formatlayıcı metin testi."""
         self.assertEqual(format_duration(0), "0 sn")

@@ -37,6 +37,7 @@ class TestViewsAndEmbeds(unittest.TestCase):
         custom_ids = [item.custom_id for item in view.children if isinstance(item, discord.ui.Button)]
         self.assertIn("btn_get_report", custom_ids)
         self.assertIn("btn_active_shifts", custom_ids)
+        self.assertIn("btn_force_close_all", custom_ids)
 
     def test_afk_view_properties(self):
         """AFKVerificationView'in timeout ve custom_id'lerini doğrula."""
@@ -53,6 +54,7 @@ class TestViewsAndEmbeds(unittest.TestCase):
 
         admin_embed = create_admin_panel_embed()
         self.assertIn("YÖNETİCİ", admin_embed.title)
+        self.assertIn("Tüm Mesaileri Kapat", admin_embed.description)
 
         warn_embed = create_warning_embed("Test Uyarı", "Açıklama")
         self.assertIn("⚠️", warn_embed.title)
@@ -81,14 +83,24 @@ class TestViewsAndEmbeds(unittest.TestCase):
             mention = "<@222>"
             id = 222
 
-        afk_prompt = create_afk_prompt_embed(MockUser())
+        afk_prompt = create_afk_prompt_embed(MockUser(), minutes_active=45, timeout_minutes=1)
         self.assertIn("DOĞRULAMASI", afk_prompt.title)
+        self.assertIn("1 dakika (60 saniye)", afk_prompt.description)
+        self.assertIn("son 45 dakikalık süre silinir", afk_prompt.description)
 
         afk_ver = create_afk_verified_embed(MockUser())
         self.assertIn("Doğrulandı", afk_ver.title)
 
-        afk_to = create_afk_timeout_embed(MockUser(), 3600)
+        afk_to = create_afk_timeout_embed(
+            MockUser(),
+            duration_seconds=4500,
+            raw_duration_seconds=7200,
+            deducted_seconds=2700,
+            timeout_minutes=1
+        )
         self.assertIn("Kapatıldı", afk_to.title)
+        self.assertIn("Ham Oturum Süresi", afk_to.description)
+        self.assertIn("Uygulanan Ceza", afk_to.description)
 
 if __name__ == "__main__":
     unittest.main()

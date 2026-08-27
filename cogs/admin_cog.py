@@ -332,6 +332,76 @@ class AdminCog(commands.Cog):
                 ephemeral=True
             )
 
+    @app_commands.command(
+        name="mesai-tumunu-bitir",
+        description="Sunucuda açık olan tüm aktif personel mesailerini yönetici olarak toplu sonlandırır."
+    )
+    async def force_end_all_command(self, interaction: discord.Interaction):
+        """Yetkili tarafından tüm açık mesaileri toplu kapatma komutu."""
+        if not has_admin_permission(interaction.user):
+            await interaction.response.send_message(
+                embed=create_error_embed("Yetkisiz Erişim", "Bu komutu yalnızca yöneticiler kullanabilir."),
+                ephemeral=True
+            )
+            return
+
+        guild = interaction.guild
+        if not guild:
+            await interaction.response.send_message("Bu komut yalnızca sunucularda kullanılabilir.", ephemeral=True)
+            return
+
+        active_shifts = await db.get_all_active_shifts(guild.id)
+        if not active_shifts:
+            await interaction.response.send_message(
+                embed=create_warning_embed(
+                    title="Aktif Mesai Bulunamadı",
+                    message="Şu anda sunucuda devam eden aktif bir personel mesaisi bulunmamaktadır."
+                ),
+                ephemeral=True
+            )
+            return
+
+        now = discord.utils.utcnow()
+        count, closed_records = await db.force_end_all_shifts(
+            guild_id=guild.id,
+            admin_name=interaction.user.display_name
+        )
+
+        # Panelleri ve Denetim Logunu Güncelle
+        await panel_manager.update_all_panels(guild)
+
+        log_embed = create_log_embed(
+            action_type="FORCE_CLOSED_ALL",
+            user=interaction.user,
+            details={
+                "👮 İşlemi Yapan Yetkili": interaction.user.display_name,
+                "👥 Kapatılan Mesai Sayısı": f"{count} personel",
+                "🕒 Kapatılma Zamanı": f"<t:{int(now.timestamp())}:F>"
+            }
+        )
+        await panel_manager.send_audit_log(guild, log_embed)
+
+        summary_embed = discord.Embed(
+            title="🛑 Tüm Aktif Mesailer Kapatıldı",
+            description=f"Sunucudaki **{count}** personelin açık olan mesai oturumu başarıyla sonlandırıldı.",
+            color=0xE74C3C
+        )
+        summary_embed.add_field(name="👮 Kapatan Yetkili", value=interaction.user.mention, inline=True)
+        summary_embed.add_field(name="👥 Kapatılan Personel Sayısı", value=f"**{count}** kişi", inline=True)
+        summary_embed.add_field(name="🕒 Kapatılma Zamanı", value=f"<t:{int(now.timestamp())}:F>", inline=False)
+
+        if closed_records:
+            user_list = [
+                f"• <@{rec['user_id']}> (`{rec['user_name']}`) — Süre: `{format_duration(rec['duration_seconds'])}`"
+                for rec in closed_records[:10]
+            ]
+            if len(closed_records) > 10:
+                user_list.append(f"... ve {len(closed_records) - 10} kişi daha.")
+            summary_embed.add_field(name="📋 Kapatılan Personeller", value="\n".join(user_list), inline=False)
+
+        summary_embed.set_footer(text="Lucas2 Yönetici Komutu • Canlı Paneller Güncellendi")
+        await interaction.response.send_message(embed=summary_embed, ephemeral=True)
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(AdminCog(bot))
 
