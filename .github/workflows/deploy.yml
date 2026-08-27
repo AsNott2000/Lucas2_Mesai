@@ -1,0 +1,101 @@
+name: CI/CD Pipeline - Docker Hub & SSH Deploy
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # GitHub arayüzünden manuel tetikleme
+
+jobs:
+  # -------------------------------------------------------------
+  # 1. Aşama: Testler (CI)
+  # -------------------------------------------------------------
+  test:
+    name: 🧪 Run Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📂 Check out repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🧪 Run Unit Tests
+        run: |
+          python -m unittest discover tests
+
+  # -------------------------------------------------------------
+  # 2. Aşama: Docker Hub'a İmaj Derleme & Push
+  # -------------------------------------------------------------
+  build-and-push:
+    name: 🐳 Build & Push to Docker Hub
+    needs: test
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📂 Check out repository
+        uses: actions/checkout@v4
+
+      - name: 🛠️ Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔑 Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 🚀 Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/lucas2-mesai:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/lucas2-mesai:${{ github.sha }}
+
+  # -------------------------------------------------------------
+  # 3. Aşama: Ubuntu Sunucusuna SSH ile Dağıtım (CD)
+  # -------------------------------------------------------------
+  deploy:
+    name: 🚀 Deploy to Ubuntu Server (SSH)
+    needs: build-and-push
+    if: (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 🌐 SSH Remote Commands & Pull from Docker Hub
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: 22
+          script_stop: true
+          script: |
+            # Sunucudaki proje çalışma dizinine git
+            cd ${{ secrets.WORK_DIR || '/opt/Lucas2_Mesai' }}
+
+            echo "📥 Docker Hub'dan en güncel imaj çekiliyor..."
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/lucas2-mesai:latest
+
+            echo "🚀 Bot konteyneri güncelleniyor ve başlatılıyor..."
+            DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/lucas2-mesai:latest docker compose up -d --remove-orphans
+
+            echo "🧹 Eski ve kullanılmayan imajlar temizleniyor..."
+            docker image prune -f
+
+            echo "✅ Dağıtım başarıyla tamamlandı!"
+            docker compose ps

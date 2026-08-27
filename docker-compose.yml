@@ -1,5 +1,6 @@
 services:
   lucas2-bot:
+    image: ${DOCKER_IMAGE:-lucas2-mesai:latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,7 +12,7 @@ services:
       - TZ=Europe/Istanbul
       - PYTHONUNBUFFERED=1
     volumes:
-      # SQLite veritabanının sunucu kapansa/yeniden başlasa bile silinmemesi için kalıcı volume
+      # SQLite veritabanının kalıcı tutulması için volume
       - ./data:/app/data
     logging:
       driver: "json-file"
