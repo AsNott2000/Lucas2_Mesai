@@ -88,6 +88,12 @@ jobs:
             # Sunucudaki proje çalışma dizinine git
             cd ${{ secrets.WORK_DIR || '/opt/Lucas2_Mesai' }}
 
+            # Eğer dizin bir Git deposu ise son değişiklikleri çek
+            if [ -d ".git" ]; then
+              echo "📥 Sunucudaki Git deposu güncelleniyor (git pull)..."
+              git pull origin $(git branch --show-current 2>/dev/null || echo "main")
+            fi
+
             echo "📥 Docker Hub'dan en güncel imaj çekiliyor..."
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/lucas2-mesai:latest
 
