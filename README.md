@@ -24,9 +24,9 @@ Lucas2 Mesai Botu; Discord sunucularında personellerin, moderatörlerin veya ye
 ### 4. Otomatik Çalışma / AFK Doğrulama Mekanizması (45 Dakikada Bir)
 - ⏱️ **45 Dakikalık Zamanlayıcı:** Mesai başlatan her personel için arka planda 45 dakikalık aktiflik döngüsü çalışır.
 - 💬 **İnteraktif Doğrulama Butonu:** Süre dolduğunda bot kullanıcıya DM üzerinden `"Buradayım / Mesaiyi Doğrula"` butonu gönderir (DM kapalıysa mesai kanalında geçici ping atar).
-- ⏳ **5 Dakika Yanıt Süresi:**
+- ⏳ **15 Dakika Yanıt Süresi:**
   - **Doğrularsa:** Zamanlayıcı sıfırlanır ve sonraki 45 dakika için mesai devam eder.
-  - **Doğrulamazsa (Zaman Aşımı):** Personelin mesaisi otomatik olarak kapatılır (`AFK_CLOSED`), süre hesaplanır, log kanalına denetim kaydı düşülür ve kullanıcı bilgilendirilir.
+  - **Doğrulamazsa (Zaman Aşımı):** Personelin mesaisi otomatik olarak kapatılır (`AFK_CLOSED`), son 61 dakikalık süre silinir, log kanalına denetim kaydı düşülür ve kullanıcı bilgilendirilir.
 - 🔄 **Yeniden Başlatma Dayanıklılığı:** Bot restart atsa bile SQLite `last_verified_at` zaman damgaları sayesinde aktif zamanlayıcılar ve durumlar korunur.
 
 ### 5. Yönetici Paneli (`#admin-settings` Kanalı)

@@ -293,7 +293,8 @@ def create_active_shifts_embed(active_shifts: List[Dict[str, Any]]) -> discord.E
 def create_afk_prompt_embed(
     user: discord.User | discord.Member,
     minutes_active: int = 45,
-    timeout_minutes: int = 1
+    timeout_minutes: int = 15,
+    penalty_minutes: int = 61
 ) -> discord.Embed:
     """Kullanıcıya 45 dakika dolduğunda iletilen aktiflik doğrulama embedi."""
     timeout_text = f"{timeout_minutes} dakika (60 saniye)" if timeout_minutes == 1 else f"{timeout_minutes} dakika"
@@ -306,7 +307,7 @@ def create_afk_prompt_embed(
             f"⏳ **Yanıt Süreniz:** **{timeout_text}**\n\n"
             f"⚠️ **ÖNEMLİ CEZA KURALI:**\n"
             f"• Belirtilen süre içerisinde doğrulama yapmazsanız mesainiz otomatik olarak kapatılır.\n"
-            f"• Oturumunuzdan **son {minutes_active} dakikalık süre silinir/düşülür** (Toplam süre {minutes_active} dk altındaysa oturum geçersiz sayılır)."
+            f"• Oturumunuzdan **son {penalty_minutes} dakikalık süre silinir/düşülür** (Toplam süre {penalty_minutes} dk altındaysa oturum geçersiz sayılır)."
         ),
         color=0xE67E22  # Orange
     )
@@ -330,7 +331,8 @@ def create_afk_timeout_embed(
     duration_seconds: int,
     raw_duration_seconds: Optional[int] = None,
     deducted_seconds: Optional[int] = None,
-    timeout_minutes: int = 1
+    timeout_minutes: int = 15,
+    penalty_minutes: int = 61
 ) -> discord.Embed:
     """Zaman aşımına uğrayıp kapatılan mesai bildirim embedi."""
     timeout_text = f"{timeout_minutes} dakika (60 saniye)" if timeout_minutes == 1 else f"{timeout_minutes} dakika"
@@ -342,7 +344,7 @@ def create_afk_timeout_embed(
 
     if raw_duration_seconds is not None and deducted_seconds is not None:
         desc_lines.append(f"⏱️ **Ham Oturum Süresi:** `{format_duration(raw_duration_seconds)}`")
-        desc_lines.append(f"⚠️ **Uygulanan Ceza:** `-{format_duration(deducted_seconds)}` (Son 45 dk silindi)")
+        desc_lines.append(f"⚠️ **Uygulanan Ceza:** `-{format_duration(deducted_seconds)}` (Son {penalty_minutes} dk silindi)")
         desc_lines.append(f"⌛ **Kayda Geçen Net Süre:** **{format_duration(duration_seconds)}**\n")
     else:
         desc_lines.append(f"⌛ **Kaydedilen Toplam Süre:** **{format_duration(duration_seconds)}**\n")

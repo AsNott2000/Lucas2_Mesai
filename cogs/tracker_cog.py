@@ -133,7 +133,8 @@ class TrackerCog(commands.Cog):
         embed = create_afk_prompt_embed(
             user=user_obj,
             minutes_active=config.AFK_CHECK_INTERVAL_MINUTES,
-            timeout_minutes=config.AFK_TIMEOUT_MINUTES
+            timeout_minutes=config.AFK_TIMEOUT_MINUTES,
+            penalty_minutes=config.AFK_PENALTY_MINUTES
         )
         view = AFKVerificationView()
 
@@ -141,7 +142,7 @@ class TrackerCog(commands.Cog):
         try:
             await user_obj.send(embed=embed, view=view)
             dm_sent = True
-            logger.info(f"Kullanıcıya ({user_obj.name}) DM üzerinden 45 dk AFK doğrulama mesajı gönderildi.")
+            logger.info(f"Kullanıcıya ({user_obj.name}) DM üzerinden {config.AFK_CHECK_INTERVAL_MINUTES} dk AFK doğrulama mesajı gönderildi.")
         except (discord.Forbidden, discord.HTTPException):
             logger.warning(f"Kullanıcıya ({user_obj.name}) DM kapalı olduğu için mesaj iletilemedi.")
 
@@ -157,7 +158,7 @@ class TrackerCog(commands.Cog):
                 try:
                     timeout_label = f"{config.AFK_TIMEOUT_MINUTES} dakika (60 saniye)" if config.AFK_TIMEOUT_MINUTES == 1 else f"{config.AFK_TIMEOUT_MINUTES} dakika"
                     await mesai_ch.send(
-                        content=f"⚠️ {member.mention} **Mesai Doğrulaması:** DM kutunuz kapalı olduğu için buraya iletildi! Lütfen {timeout_label} içinde onaylayınız (Aksi halde son 45 dakikanız silinecektir):",
+                        content=f"⚠️ {member.mention} **Mesai Doğrulaması:** DM kutunuz kapalı olduğu için buraya iletildi! Lütfen {timeout_label} içinde onaylayınız (Aksi halde son {config.AFK_PENALTY_MINUTES} dakikanız silinecektir):",
                         embed=embed,
                         view=view,
                         delete_after=config.AFK_TIMEOUT_MINUTES * 60
@@ -168,12 +169,12 @@ class TrackerCog(commands.Cog):
     async def _handle_afk_timeout(
         self, guild: discord.Guild, member: Optional[discord.Member], user_id: int, now: datetime
     ):
-        """Doğrulama yapmayan personelin mesaisini otomatik kapatır, son 45 dakikayı siler ve loglar."""
+        """Doğrulama yapmayan personelin mesaisini otomatik kapatır, belirlenen ceza süresini siler ve loglar."""
         success, result_data, msg = await db.end_shift_afk(
             guild_id=guild.id,
             user_id=user_id,
             end_time=now,
-            note="AFK - Doğrulama Yapılmadı (45 dk düşüldü)"
+            note=f"AFK - Doğrulama Yapılmadı ({config.AFK_PENALTY_MINUTES} dk düşüldü)"
         )
 
         if not success or not result_data:
@@ -204,7 +205,8 @@ class TrackerCog(commands.Cog):
                     duration_seconds=duration_sec,
                     raw_duration_seconds=raw_duration_sec,
                     deducted_seconds=deducted_sec,
-                    timeout_minutes=config.AFK_TIMEOUT_MINUTES
+                    timeout_minutes=config.AFK_TIMEOUT_MINUTES,
+                    penalty_minutes=config.AFK_PENALTY_MINUTES
                 )
                 await user_obj.send(embed=timeout_embed)
             except Exception:
@@ -217,9 +219,9 @@ class TrackerCog(commands.Cog):
                 user=user_obj,
                 details={
                     "⏱️ Ham Oturum Süresi": format_duration(raw_duration_sec),
-                    "⚠️ Uygulanan Ceza": f"-{format_duration(deducted_sec)} (45 dk silindi)",
+                    "⚠️ Uygulanan Ceza": f"-{format_duration(deducted_sec)} ({config.AFK_PENALTY_MINUTES} dk silindi)",
                     "⌛ Kaydedilen Net Süre": format_duration(duration_sec),
-                    "📌 Kapatma Nedeni": "AFK - Doğrulama Yapılmadı (45 dk düşüldü)",
+                    "📌 Kapatma Nedeni": f"AFK - Doğrulama Yapılmadı ({config.AFK_PENALTY_MINUTES} dk düşüldü)",
                     "🕒 Kapatılma Zamanı": f"<t:{int(now.timestamp())}:F>"
                 }
             )

@@ -203,22 +203,22 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(closed_empty), 0)
 
     async def test_afk_penalty_deduction(self):
-        """AFK zaman aşımında son 45 dakikanın düşülmesi ve sınır durumların testi."""
+        """AFK zaman aşımında son 61 dakikanın düşülmesi ve sınır durumların testi."""
         guild_id = 5555
         u_long = 501  # 2 saatlik oturum
         u_short = 502 # 30 dakikalık oturum
         t0 = datetime(2026, 8, 27, 8, 0, 0, tzinfo=timezone.utc)
 
-        # 1. Durum: 2 saat (120 dk) çalışan personel -> 45 dk düşülüp 1 saat 15 dk (75 dk = 4500 sn) olmalı
+        # 1. Durum: 2 saat (120 dk) çalışan personel -> 61 dk düşülüp 59 dk (3540 sn) olmalı
         await self.db.start_shift(guild_id, u_long, "LongWorker", t0)
         end_time_long = t0 + timedelta(hours=2)
         success_long, res_long, msg_long = await self.db.end_shift_afk(guild_id, u_long, end_time_long)
         self.assertTrue(success_long)
         self.assertEqual(res_long["raw_duration_seconds"], 2 * 3600)  # 7200 sn
-        self.assertEqual(res_long["deducted_seconds"], 45 * 60)       # 2700 sn
-        self.assertEqual(res_long["duration_seconds"], 75 * 60)       # 4500 sn (1 sa 15 dk)
+        self.assertEqual(res_long["deducted_seconds"], 61 * 60)       # 3660 sn
+        self.assertEqual(res_long["duration_seconds"], 59 * 60)       # 3540 sn (59 dk)
 
-        # 2. Durum: 30 dakika çalışan personel (45 dk'dan az) -> Oturum 0 sn (geçersiz) olmalı
+        # 2. Durum: 30 dakika çalışan personel (61 dk'dan az) -> Oturum 0 sn (geçersiz) olmalı
         await self.db.start_shift(guild_id, u_short, "ShortWorker", t0)
         end_time_short = t0 + timedelta(minutes=30)
         success_short, res_short, msg_short = await self.db.end_shift_afk(guild_id, u_short, end_time_short)
@@ -229,7 +229,7 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
 
         # İstatistik kontrolü
         stats_long = await self.db.get_user_stats(guild_id, u_long)
-        self.assertEqual(stats_long["total_duration"], 4500)
+        self.assertEqual(stats_long["total_duration"], 3540)
         self.assertEqual(stats_long["total_shifts"], 1)
 
         stats_short = await self.db.get_user_stats(guild_id, u_short)

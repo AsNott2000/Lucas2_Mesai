@@ -19,7 +19,8 @@ class Config:
     MESAI_TABLO_CHANNEL_ID: Optional[int] = int(os.getenv("MESAI_TABLO_CHANNEL_ID")) if os.getenv("MESAI_TABLO_CHANNEL_ID") and os.getenv("MESAI_TABLO_CHANNEL_ID").isdigit() else None
     LOG_CHANNEL_ID: Optional[int] = int(os.getenv("LOG_CHANNEL_ID")) if os.getenv("LOG_CHANNEL_ID") and os.getenv("LOG_CHANNEL_ID").isdigit() else None
     AFK_CHECK_INTERVAL_MINUTES: int = int(os.getenv("AFK_CHECK_INTERVAL_MINUTES", "45"))
-    AFK_TIMEOUT_MINUTES: int = int(os.getenv("AFK_TIMEOUT_MINUTES", "1"))
+    AFK_TIMEOUT_MINUTES: int = int(os.getenv("AFK_TIMEOUT_MINUTES", "15"))
+    AFK_PENALTY_MINUTES: int = int(os.getenv("AFK_PENALTY_MINUTES", "61"))
     DATABASE_PATH: str = os.getenv("DATABASE_PATH", "data/mesai.db")
     TIMEZONE: str = os.getenv("TIMEZONE", "Europe/Istanbul")
 

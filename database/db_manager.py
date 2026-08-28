@@ -231,8 +231,8 @@ class DatabaseManager:
     ) -> Tuple[bool, Optional[Dict[str, Any]], str]:
         """
         AFK doğrulama süresi aşımı nedeniyle mesaiyi otomatik sonlandırır.
-        Son 45 dakikalık dilim mesai süresinden silinir/düşülür.
-        Toplam süre 45 dakikadan az ise oturum süresi 0 sn (geçersiz) olarak kayda geçer.
+        Son 61 dakikalık dilim mesai süresinden silinir/düşülür.
+        Toplam süre 61 dakikadan az ise oturum süresi 0 sn (geçersiz) olarak kayda geçer.
         """
         if end_time is None:
             end_time = datetime.now(timezone.utc)
@@ -251,10 +251,10 @@ class DatabaseManager:
                 start_dt = start_dt.replace(tzinfo=timezone.utc)
 
             raw_duration_seconds = max(0, int((end_time - start_dt).total_seconds()))
-            penalty_seconds = config.AFK_CHECK_INTERVAL_MINUTES * 60  # 45 * 60 = 2700 sn
+            penalty_seconds = config.AFK_PENALTY_MINUTES * 60  # 61 * 60 = 3660 sn
             final_duration_seconds = max(0, raw_duration_seconds - penalty_seconds)
             deducted_seconds = min(raw_duration_seconds, penalty_seconds)
-            note_text = note or "AFK - Doğrulama Yapılmadı (45 dk düşüldü)"
+            note_text = note or f"AFK - Doğrulama Yapılmadı ({config.AFK_PENALTY_MINUTES} dk düşüldü)"
 
             async with aiosqlite.connect(self.db_path) as conn:
                 conn.row_factory = aiosqlite.Row

@@ -139,24 +139,26 @@ class TestViewsAndEmbeds(unittest.TestCase):
         self.assertIn("mesai-raporu-2026-08-28.txt", summary_embed.fields[1].value)
 
         # AFK embed testleri
-        afk_prompt = create_afk_prompt_embed(MockUser(), minutes_active=45, timeout_minutes=1)
+        afk_prompt = create_afk_prompt_embed(MockUser(), minutes_active=45, timeout_minutes=15, penalty_minutes=61)
         self.assertIn("DOĞRULAMASI", afk_prompt.title)
-        self.assertIn("1 dakika (60 saniye)", afk_prompt.description)
-        self.assertIn("son 45 dakikalık süre silinir", afk_prompt.description)
+        self.assertIn("15 dakika", afk_prompt.description)
+        self.assertIn("son 61 dakikalık süre silinir", afk_prompt.description)
 
         afk_ver = create_afk_verified_embed(MockUser())
         self.assertIn("Doğrulandı", afk_ver.title)
 
         afk_to = create_afk_timeout_embed(
             MockUser(),
-            duration_seconds=4500,
+            duration_seconds=3540,
             raw_duration_seconds=7200,
-            deducted_seconds=2700,
-            timeout_minutes=1
+            deducted_seconds=3660,
+            timeout_minutes=15,
+            penalty_minutes=61
         )
         self.assertIn("Kapatıldı", afk_to.title)
         self.assertIn("Ham Oturum Süresi", afk_to.description)
         self.assertIn("Uygulanan Ceza", afk_to.description)
+        self.assertIn("Son 61 dk silindi", afk_to.description)
 
 if __name__ == "__main__":
     unittest.main()
