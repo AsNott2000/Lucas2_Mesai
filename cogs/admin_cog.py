@@ -7,6 +7,7 @@ from typing import Optional
 from config import config
 from database import db
 from services.panel_manager import panel_manager
+from services.notification_service import notification_service
 from views.admin_view import AdminView
 from views.shift_view import ShiftView
 from utils.permissions import has_admin_permission
@@ -17,6 +18,7 @@ from utils.formatters import (
     create_shift_panel_embed,
     create_log_embed,
     create_error_embed,
+    create_warning_embed,
     format_duration,
 )
 
@@ -366,6 +368,18 @@ class AdminCog(commands.Cog):
             guild_id=guild.id,
             admin_name=interaction.user.display_name
         )
+
+        # Mesaisi kapatılan personellere DM ve alternatif kanal bildirimi gönder
+        if closed_records and interaction.client:
+            import asyncio
+            asyncio.create_task(
+                notification_service.notify_closed_shifts_on_report(
+                    bot=interaction.client,
+                    guild=guild,
+                    closed_records=closed_records,
+                    admin_name=interaction.user.display_name
+                )
+            )
 
         # Panelleri ve Denetim Logunu Güncelle
         await panel_manager.update_all_panels(guild)

@@ -1,11 +1,13 @@
 import io
 import logging
+import asyncio
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 import discord
 from database import db
 from services.panel_manager import panel_manager
+from services.notification_service import notification_service
 from utils.permissions import has_admin_permission
 from utils.formatters import (
     create_admin_report_embed,
@@ -64,7 +66,7 @@ class ReportResetConfirmView(discord.ui.View):
             admin_name = interaction.user.display_name
 
             # 1. Devam eden tüm aktif mesaileri anlık zaman damgasıyla otomatik kapat
-            closed_active_count, _ = await db.force_end_all_shifts(
+            closed_active_count, closed_records = await db.force_end_all_shifts(
                 guild_id=guild.id,
                 admin_name=admin_name
             )
@@ -93,7 +95,18 @@ class ReportResetConfirmView(discord.ui.View):
             # 5. Veritabanındaki ilgili dönem mesai kayıtlarını sıfırla / temizle
             deleted_records_count = await db.reset_guild_shifts(guild.id)
 
-            # 6. #aktif-mesailer ve #mesai-tablo panellerini anında sıfırlanmış duruma göre güncelle
+            # 6. Kapatılan aktif personellere DM ve alternatif kanal bildirimi gönder
+            if closed_records and interaction.client:
+                asyncio.create_task(
+                    notification_service.notify_closed_shifts_on_report(
+                        bot=interaction.client,
+                        guild=guild,
+                        closed_records=closed_records,
+                        admin_name=admin_name
+                    )
+                )
+
+            # 7. #aktif-mesailer ve #mesai-tablo panellerini anında sıfırlanmış duruma göre güncelle
             await panel_manager.update_all_panels(guild)
 
             # 7. Denetim logunu ilet
@@ -189,6 +202,17 @@ class ForceCloseAllConfirmView(discord.ui.View):
             guild_id=guild.id,
             admin_name=interaction.user.display_name
         )
+
+        # Mesaisi kapatılan personellere DM ve alternatif kanal bildirimi gönder
+        if closed_records and interaction.client:
+            asyncio.create_task(
+                notification_service.notify_closed_shifts_on_report(
+                    bot=interaction.client,
+                    guild=guild,
+                    closed_records=closed_records,
+                    admin_name=interaction.user.display_name
+                )
+            )
 
         # Canlı Panelleri Anında Güncelle
         await panel_manager.update_all_panels(guild)

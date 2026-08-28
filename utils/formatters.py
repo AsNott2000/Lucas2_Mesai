@@ -447,6 +447,28 @@ def create_captcha_failed_embed(
     embed.timestamp = datetime.now(timezone.utc)
     return embed
 
+def create_report_closed_shift_dm_embed(
+    user_name: str,
+    duration_seconds: int,
+    admin_name: str = "Yönetici"
+) -> discord.Embed:
+    """Genel rapor alındığı için mesaisi otomatik kapatılan personele gönderilen bilgilendirme embedi."""
+    embed = discord.Embed(
+        title="🔔 MESAİ BİLGİLENDİRMESİ",
+        description=(
+            f"Sayın **{user_name}**,\n\n"
+            f"Yetkili yönetici (**{admin_name}**) tarafından **Genel Dönem Raporu** alındığı ve yeni çalışma dönemi "
+            f"başlatıldığı için mevcut mesai oturumunuz sistem tarafından otomatik olarak sonlandırılmıştır.\n\n"
+            f"⏱️ **Kapanan Oturum Süreniz:** `{format_duration(duration_seconds)}` (Dönem raporuna kaydedildi)\n\n"
+            f"📌 **ÖNEMLİ:** Görevinizin başında çalışmaya devam ediyorsanız, lütfen mesai kanalından "
+            f"**'Mesai Başlat'** butonunu kullanarak yeni bir mesai oturumu başlatmayı unutmayınız!"
+        ),
+        color=0x3498DB  # Blue / Info
+    )
+    embed.set_footer(text="Lucas2 Mesai Takip • Dönem Kapanış Bildirimi")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
 def create_log_embed(
     action_type: str,
     user: Optional[discord.User | discord.Member] = None,
