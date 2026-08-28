@@ -360,6 +360,93 @@ def create_afk_timeout_embed(
     embed.timestamp = datetime.now(timezone.utc)
     return embed
 
+def create_captcha_prompt_embed(
+    user: discord.User | discord.Member,
+    target_name: str,
+    target_emoji: str,
+    minutes_active: int = 45,
+    timeout_seconds: int = 60,
+    penalty_minutes: int = 45
+) -> discord.Embed:
+    """Kullanıcıya CAPTCHA hedef nesne seçimini soran interaktif güvenlik embedi."""
+    embed = discord.Embed(
+        title="🧩 GÜVENLİK & CAPTCHA DOĞRULAMASI",
+        description=(
+            f"Sayın **{user.display_name}**,\n\n"
+            f"Mesainiz **{minutes_active} dakikadır** kesintisiz olarak devam etmektedir.\n"
+            f"Bot veya otomatik tıklama kullanımını önlemek amacıyla lütfen aşağıdaki güvenlik görevini tamamlayınız.\n\n"
+            f"🎯 **HEDEF GÖREV:**\n"
+            f"Lütfen aşağıdaki butonlardan **\"{target_name}\"** ({target_emoji}) olan seçeneğe tıklayınız.\n\n"
+            f"⏳ **Yanıt Süreniz:** `{timeout_seconds} saniye` (1 Dakika)\n\n"
+            f"⚠️ **CEZA UYARISI:**\n"
+            f"• **Yanlış butona basarsanız** veya **{timeout_seconds} saniye içinde yanıt vermezseniz** mesainiz anında kapatılır.\n"
+            f"• Toplam mesainizden **son {penalty_minutes} dakika silinir/kesilir**."
+        ),
+        color=0xE67E22  # Orange
+    )
+    embed.set_footer(text="Lucas2 Anti-Bot & CAPTCHA Güvenlik Sistemi")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
+def create_captcha_success_embed(
+    user: discord.User | discord.Member,
+    challenge: Any
+) -> discord.Embed:
+    """Kullanıcı doğru CAPTCHA seçeneğini tıkladığında gösterilen onay embedi."""
+    target_name = getattr(challenge, "target_name", "Doğru Seçenek")
+    target_emoji = getattr(challenge, "target_emoji", "✅")
+    embed = discord.Embed(
+        title="✅ CAPTCHA Başarıyla Doğrulandı!",
+        description=(
+            f"Tebrikler **{user.display_name}**!\n\n"
+            f"Doğru nesneyi (**{target_name}** {target_emoji}) başarıyla seçtiniz.\n"
+            f"Aktifliğiniz onaylandı ve mesainiz bir sonraki kontrole kadar kesintisiz devam ediyor.\n\n"
+            f"*İyi çalışmalar ve kolaylıklar dileriz!*"
+        ),
+        color=0x2ECC71  # Green
+    )
+    embed.set_footer(text="Lucas2 Mesai Takip • Güvenlik Doğrulandı")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
+def create_captcha_failed_embed(
+    user: discord.User | discord.Member,
+    target_name: str,
+    target_emoji: str,
+    chosen_name: str,
+    chosen_emoji: str,
+    duration_seconds: int,
+    raw_duration_seconds: Optional[int] = None,
+    deducted_seconds: Optional[int] = None,
+    penalty_minutes: int = 45
+) -> discord.Embed:
+    """Kullanıcı hatalı CAPTCHA seçimi yaptığında gösterilen bildirim embedi."""
+    desc_lines = [
+        f"Sayın **{user.display_name}**,\n",
+        f"Güvenlik doğrulamasında **hatalı butona tıkladınız!**\n",
+        f"🎯 **İstenen Nesne:** `{target_name}` {target_emoji}",
+        f"❌ **Seçtiğiniz:** `{chosen_name}` {chosen_emoji}\n",
+        f"Bu nedenle mesainiz **CAPTCHA Başarısız / Hatalı Seçim** gerekçesiyle derhal sonlandırılmıştır.\n",
+    ]
+
+    if raw_duration_seconds is not None and deducted_seconds is not None:
+        desc_lines.append(f"⏱️ **Ham Oturum Süresi:** `{format_duration(raw_duration_seconds)}`")
+        desc_lines.append(f"⚠️ **Uygulanan Ceza:** `-{format_duration(deducted_seconds)}` (Son {penalty_minutes} dk silindi)")
+        desc_lines.append(f"⌛ **Kayda Geçen Net Süre:** **{format_duration(duration_seconds)}**\n")
+    else:
+        desc_lines.append(f"⌛ **Kaydedilen Toplam Süre:** **{format_duration(duration_seconds)}**\n")
+
+    desc_lines.append("📌 *Tekrar göreve başladığınızda lütfen mesai kanalından yeni bir oturum başlatınız.*")
+
+    embed = discord.Embed(
+        title="🛑 CAPTCHA Başarısız! Mesainiz Kapatıldı",
+        description="\n".join(desc_lines),
+        color=0xE74C3C  # Danger Red
+    )
+    embed.set_footer(text="Lucas2 Anti-Bot & Güvenlik Sistemi • Ceza Uygulandı")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
 def create_log_embed(
     action_type: str,
     user: Optional[discord.User | discord.Member] = None,

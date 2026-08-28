@@ -8,10 +8,13 @@ from typing import Dict, Any, Optional
 from config import config
 from database import db
 from services.panel_manager import panel_manager
+from services.captcha_service import generate_captcha_challenge
+from views.captcha_view import CaptchaVerificationView
 from views.afk_view import AFKVerificationView
 from utils.formatters import (
     create_afk_prompt_embed,
     create_afk_timeout_embed,
+    create_captcha_prompt_embed,
     create_log_embed,
     parse_iso_or_datetime,
     format_duration,
@@ -22,7 +25,7 @@ logger = logging.getLogger("Lucas2MesaiBot.TrackerCog")
 class TrackerCog(commands.Cog):
     """
     Arka plan zamanlanmış görevleri (Tasks):
-    1. 45 Dakikalık AFK Doğrulama Sistemi
+    1. 45 Dakikalık AFK / CAPTCHA Doğrulama Sistemi
     2. Doğrulama Zaman Aşımı ve Otomatik Mesai Kapatma
     3. #aktif-mesailer ve #mesai-tablo Canlı Panellerinin Periyodik Senkronizasyonu
     4. #mesai Kanalı Otomatik Mesaj Temizleme Dinleyicisi
@@ -88,7 +91,7 @@ class TrackerCog(commands.Cog):
                     if elapsed_since_verified >= afk_interval_sec:
                         await self._send_afk_verification_prompt(guild, member, user_id, now)
 
-                # DURUM 2: Doğrulama mesajı gönderilmiş ve bekleme süresi (1 dk) aşılmış
+                # DURUM 2: Doğrulama mesajı gönderilmiş ve bekleme süresi aşılmış
                 else:
                     elapsed_since_prompt = (now - verification_sent_dt).total_seconds()
                     if elapsed_since_prompt >= timeout_sec:
@@ -111,12 +114,12 @@ class TrackerCog(commands.Cog):
     async def before_tracker_loop(self):
         """Bot tamamen hazır olana kadar bekle."""
         await self.bot.wait_until_ready()
-        logger.info("AFK ve Canlı Panel Takip Döngüsü (TrackerLoop) başlatıldı.")
+        logger.info("AFK / CAPTCHA ve Canlı Panel Takip Döngüsü (TrackerLoop) başlatıldı.")
 
     async def _send_afk_verification_prompt(
         self, guild: discord.Guild, member: Optional[discord.Member], user_id: int, now: datetime
     ):
-        """Kullanıcıya DM veya kanal üzerinden 45 dakikalık AFK doğrulama butonu gönderir."""
+        """Kullanıcıya DM veya kanal üzerinden 45 dakikalık dinamik CAPTCHA doğrulama mesajı gönderir."""
         await db.set_verification_sent(guild.id, user_id, now)
 
         user_obj = member
@@ -130,19 +133,30 @@ class TrackerCog(commands.Cog):
             logger.warning(f"Kullanıcı ID {user_id} Discord üzerinde bulunamadı.")
             return
 
-        embed = create_afk_prompt_embed(
+        timeout_sec = config.AFK_TIMEOUT_MINUTES * 60
+        challenge = generate_captcha_challenge(
+            user_id=user_id,
+            guild_id=guild.id,
+            option_count=4,
+            timeout_seconds=timeout_sec
+        )
+
+        embed = create_captcha_prompt_embed(
             user=user_obj,
+            target_name=challenge.target_name,
+            target_emoji=challenge.target_emoji,
             minutes_active=config.AFK_CHECK_INTERVAL_MINUTES,
-            timeout_minutes=config.AFK_TIMEOUT_MINUTES,
+            timeout_seconds=timeout_sec,
             penalty_minutes=config.AFK_PENALTY_MINUTES
         )
-        view = AFKVerificationView()
+        view = CaptchaVerificationView(challenge=challenge, bot=self.bot)
 
         dm_sent = False
         try:
-            await user_obj.send(embed=embed, view=view)
+            sent_msg = await user_obj.send(embed=embed, view=view)
+            view.message = sent_msg
             dm_sent = True
-            logger.info(f"Kullanıcıya ({user_obj.name}) DM üzerinden {config.AFK_CHECK_INTERVAL_MINUTES} dk AFK doğrulama mesajı gönderildi.")
+            logger.info(f"Kullanıcıya ({user_obj.name}) DM üzerinden CAPTCHA doğrulama mesajı gönderildi (Hedef: {challenge.target_name}).")
         except (discord.Forbidden, discord.HTTPException):
             logger.warning(f"Kullanıcıya ({user_obj.name}) DM kapalı olduğu için mesaj iletilemedi.")
 
@@ -156,15 +170,15 @@ class TrackerCog(commands.Cog):
             )
             if mesai_ch:
                 try:
-                    timeout_label = f"{config.AFK_TIMEOUT_MINUTES} dakika (60 saniye)" if config.AFK_TIMEOUT_MINUTES == 1 else f"{config.AFK_TIMEOUT_MINUTES} dakika"
-                    await mesai_ch.send(
-                        content=f"⚠️ {member.mention} **Mesai Doğrulaması:** DM kutunuz kapalı olduğu için buraya iletildi! Lütfen {timeout_label} içinde onaylayınız (Aksi halde son {config.AFK_PENALTY_MINUTES} dakikanız silinecektir):",
+                    sent_msg = await mesai_ch.send(
+                        content=f"⚠️ {member.mention} **Güvenlik / CAPTCHA Doğrulaması:** DM kutunuz kapalı olduğu için buraya iletildi! Lütfen {timeout_sec} saniye içinde doğru seçeneği tıklayınız (Aksi halde son {config.AFK_PENALTY_MINUTES} dakikanız silinecektir):",
                         embed=embed,
                         view=view,
-                        delete_after=config.AFK_TIMEOUT_MINUTES * 60
+                        delete_after=timeout_sec
                     )
+                    view.message = sent_msg
                 except Exception as e:
-                    logger.warning(f"Kanal üzerinden AFK uyarısı gönderilemedi: {e}")
+                    logger.warning(f"Kanal üzerinden CAPTCHA uyarısı gönderilemedi: {e}")
 
     async def _handle_afk_timeout(
         self, guild: discord.Guild, member: Optional[discord.Member], user_id: int, now: datetime
@@ -174,7 +188,7 @@ class TrackerCog(commands.Cog):
             guild_id=guild.id,
             user_id=user_id,
             end_time=now,
-            note=f"AFK - Doğrulama Yapılmadı ({config.AFK_PENALTY_MINUTES} dk düşüldü)"
+            note=f"CAPTCHA Başarısız / AFK ({config.AFK_PENALTY_MINUTES} dk kesildi)"
         )
 
         if not success or not result_data:
@@ -186,7 +200,7 @@ class TrackerCog(commands.Cog):
         user_name = result_data.get("user_name", str(user_id))
 
         logger.info(
-            f"Personel {user_name} (ID: {user_id}) AFK zaman aşımı nedeniyle mesaisi kapatıldı "
+            f"Personel {user_name} (ID: {user_id}) CAPTCHA zaman aşımı nedeniyle mesaisi kapatıldı "
             f"(Ham: {raw_duration_sec} sn, Düşülen: {deducted_sec} sn, Net: {duration_sec} sn)."
         )
 
@@ -221,7 +235,7 @@ class TrackerCog(commands.Cog):
                     "⏱️ Ham Oturum Süresi": format_duration(raw_duration_sec),
                     "⚠️ Uygulanan Ceza": f"-{format_duration(deducted_sec)} ({config.AFK_PENALTY_MINUTES} dk silindi)",
                     "⌛ Kaydedilen Net Süre": format_duration(duration_sec),
-                    "📌 Kapatma Nedeni": f"AFK - Doğrulama Yapılmadı ({config.AFK_PENALTY_MINUTES} dk düşüldü)",
+                    "📌 Kapatma Nedeni": f"CAPTCHA Başarısız / AFK ({config.AFK_PENALTY_MINUTES} dk kesildi)",
                     "🕒 Kapatılma Zamanı": f"<t:{int(now.timestamp())}:F>"
                 }
             )

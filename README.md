@@ -21,13 +21,14 @@ Lucas2 Mesai Botu; Discord sunucularında personellerin, moderatörlerin veya ye
 - 🏆 **Liderlik ve İstatistik Tablosu:** Veritabanındaki verilere dayanarak tüm personellerin toplam çalışma süresi, oturum sayısı ve son aktiflik zamanını madalyalı (🥇, 🥈, 🥉) sıralı liste olarak gösterir.
 - Oturum bitimlerinde ve periyodik arka plan görevleriyle düzenli olarak güncellenir.
 
-### 4. Otomatik Çalışma / AFK Doğrulama Mekanizması (45 Dakikada Bir)
-- ⏱️ **45 Dakikalık Zamanlayıcı:** Mesai başlatan her personel için arka planda 45 dakikalık aktiflik döngüsü çalışır.
-- 💬 **İnteraktif Doğrulama Butonu:** Süre dolduğunda bot kullanıcıya DM üzerinden `"Buradayım / Mesaiyi Doğrula"` butonu gönderir (DM kapalıysa mesai kanalında geçici ping atar).
-- ⏳ **15 Dakika Yanıt Süresi:**
-  - **Doğrularsa:** Zamanlayıcı sıfırlanır ve sonraki 45 dakika için mesai devam eder.
-  - **Doğrulamazsa (Zaman Aşımı):** Personelin mesaisi otomatik olarak kapatılır (`AFK_CLOSED`), son 61 dakikalık süre silinir, log kanalına denetim kaydı düşülür ve kullanıcı bilgilendirilir.
-- 🔄 **Yeniden Başlatma Dayanıklılığı:** Bot restart atsa bile SQLite `last_verified_at` zaman damgaları sayesinde aktif zamanlayıcılar ve durumlar korunur.
+### 4. Otomatik Çalışma / Dinamik CAPTCHA Doğrulama Mekanizması (45 Dakikada Bir)
+- ⏱️ **45 Dakikalık Güvenlik Döngüsü:** Mesai başlatan her personel için arka planda 45 dakikalık aktiflik döngüsü çalışır.
+- 🧩 **Dinamik CAPTCHA Sistemi:** Süre dolduğunda bot rastgele bir hedef nesne belirler (Örn: *Trafik Lambası* 🚦, *Otobüs* 🚌, *Bisiklet* 🚲, *Motosiklet* 🏍️ vb.) ve kullanıcıya 4 seçenekli buton arayüzü sunar.
+- 💬 **Kullanıcıya Özel Gönderim:** Doğrulama mesajı DM üzerinden iletilir (DM kapalıysa mesai kanalında geçici ping atar).
+- ⏳ **Doğrulama ve Ceza Kuralları:**
+  - **Doğru Seçim:** Kullanıcı doğru butona basarsa CAPTCHA onaylanır, zamanlayıcı sıfırlanır ve mesai kesintisiz devam eder.
+  - **Yanlış Seçim veya Zaman Aşımı:** Hatalı butona basıldığında veya süre dolduğunda personelin mesaisi derhal sonlandırılır, son süre silinir, log kanalına bildirim düşülür ve canlı paneller anında güncellenir.
+- 🔒 **Anti-Spam & Tek Kullanımlık Butonlar:** Her CAPTCHA oturumu benzersiz UUID ile oluşturulur, tıklandığı anda butonlar devre dışı kalır (`disabled=True`) ve başkalarının müdahalesi engellenir.
 
 ### 5. Yönetici Paneli (`#admin-settings` Kanalı)
 - 🛡️ **Rol / Yetki Koruması:** Yalnızca `Administrator` veya `.env` içerisinde belirlenen yetkili role sahip üyeler erişebilir.
