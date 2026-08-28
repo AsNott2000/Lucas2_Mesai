@@ -6,6 +6,11 @@ from .admin_view import (
     ForceCloseAllConfirmView,
     SingleUserCloseSelectView,
     SingleUserCloseSelect,
+    ManualUserSelect,
+    ManualTimeAdjustUserSelectView,
+    ManualActionTypeView,
+    ManualTimeAdjustModal,
+    ManualTimeAdjustConfirmView,
 )
 from .afk_view import AFKVerificationView
 
@@ -16,6 +21,11 @@ __all__ = [
     "ForceCloseAllConfirmView",
     "SingleUserCloseSelectView",
     "SingleUserCloseSelect",
+    "ManualUserSelect",
+    "ManualTimeAdjustUserSelectView",
+    "ManualActionTypeView",
+    "ManualTimeAdjustModal",
+    "ManualTimeAdjustConfirmView",
     "AFKVerificationView",
 ]
 

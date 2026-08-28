@@ -82,6 +82,7 @@ def create_admin_panel_embed() -> discord.Embed:
             "🟢 **Anlık Aktif Mesailer:** Şu anda mesaisi devam eden personelleri anlık listeler.\n"
             "🛑 **Tüm Mesaileri Kapat:** Açık olan tüm kullanıcı mesailerini onay ile sonlandırır.\n"
             "👤 **Kişi Mesaisi Kapat:** Belirli bir personelin açık mesaisini listeden seçerek sonlandırır.\n"
+            "⏱️ **Manuel Mesai Düzenle:** Belirli bir personelin mesai süresine manuel dakika ekler veya siler.\n"
         ),
         color=0x2B2D31  # Koyu Gri / Dark Slate
     )
@@ -483,6 +484,7 @@ def create_log_embed(
         "FORCE_CLOSED": 0xE67E22,      # Turuncu
         "FORCE_CLOSED_ALL": 0x992D22,  # Koyu Kırmızı
         "REPORT_AND_RESET": 0x9B59B6,  # Mor
+        "MANUAL_ADJUST": 0xF39C12,     # Amber / Turuncu
     }
     
     titles = {
@@ -492,6 +494,7 @@ def create_log_embed(
         "FORCE_CLOSED": "👮 Mesai Yönetici Tarafından Kapatıldı",
         "FORCE_CLOSED_ALL": "🛑 Tüm Mesailer Yönetici Tarafından Kapatıldı",
         "REPORT_AND_RESET": "📊 Dönem Raporu Alındı & Veriler Sıfırlandı",
+        "MANUAL_ADJUST": "⏱️ Manuel Mesai Süresi Düzenlendi",
     }
 
     embed = discord.Embed(

@@ -294,6 +294,106 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
         self.assertIn("BÖLÜM 2: DETAYLI MESAİ OTURUM GEÇMİŞİ", txt)
         self.assertIn("RAPOR SONU", txt)
 
+    async def test_adjust_user_shift_duration_add(self):
+        """Manuel süre ekleme testi."""
+        guild_id = 7777
+        user_id = 901
+        user_name = "Ali"
+        t0 = datetime(2026, 8, 27, 8, 0, 0, tzinfo=timezone.utc)
+
+        # 1. Başlangıçta 1 saatlik (3600 sn) mesai yapılmış olsun
+        await self.db.start_shift(guild_id, user_id, user_name, t0)
+        await self.db.end_shift(guild_id, user_id, t0 + timedelta(hours=1))
+
+        # 2. Yönetici 30 dakika (1800 sn) eklesin
+        success, result, msg = await self.db.adjust_user_shift_duration(
+            guild_id=guild_id,
+            user_id=user_id,
+            user_name=user_name,
+            adjustment_minutes=30,
+            action_type="add",
+            admin_name="AdminTest",
+            reason="Fazla mesai telafisi"
+        )
+        self.assertTrue(success)
+        self.assertEqual(result["old_total_seconds"], 3600)
+        self.assertEqual(result["new_total_seconds"], 5400)
+        self.assertEqual(result["delta_seconds"], 1800)
+
+        # 3. get_user_stats ve get_guild_report ile kontrol et
+        stats = await self.db.get_user_stats(guild_id, user_id)
+        self.assertEqual(stats["total_duration"], 5400)
+        self.assertEqual(stats["total_shifts"], 1)  # Oturum sayısı değişmemeli
+
+        reports = await self.db.get_guild_report(guild_id)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["total_duration"], 5400)
+        self.assertEqual(reports[0]["shift_count"], 1)
+
+    async def test_adjust_user_shift_duration_deduct(self):
+        """Manuel süre düşürme testi."""
+        guild_id = 7777
+        user_id = 902
+        user_name = "Veli"
+        t0 = datetime(2026, 8, 27, 8, 0, 0, tzinfo=timezone.utc)
+
+        # 1. Başlangıçta 2 saatlik (7200 sn) mesai yapılmış olsun
+        await self.db.start_shift(guild_id, user_id, user_name, t0)
+        await self.db.end_shift(guild_id, user_id, t0 + timedelta(hours=2))
+
+        # 2. Yönetici 45 dakika (2700 sn) silsin
+        success, result, msg = await self.db.adjust_user_shift_duration(
+            guild_id=guild_id,
+            user_id=user_id,
+            user_name=user_name,
+            adjustment_minutes=45,
+            action_type="deduct",
+            admin_name="AdminTest",
+            reason="Hatalı oturum düzeltmesi"
+        )
+        self.assertTrue(success)
+        self.assertEqual(result["old_total_seconds"], 7200)
+        self.assertEqual(result["new_total_seconds"], 4500)
+        self.assertEqual(result["delta_seconds"], -2700)
+
+        stats = await self.db.get_user_stats(guild_id, user_id)
+        self.assertEqual(stats["total_duration"], 4500)
+
+    async def test_adjust_user_shift_duration_floor_zero(self):
+        """Süre silindiğinde mevcut süreden fazlaysa 0'a eşitlenme ve negatif olmama testi."""
+        guild_id = 7777
+        user_id = 903
+        user_name = "Can"
+        t0 = datetime(2026, 8, 27, 8, 0, 0, tzinfo=timezone.utc)
+
+        # 1. Başlangıçta 15 dakika (900 sn) mesai yapılmış olsun
+        await self.db.start_shift(guild_id, user_id, user_name, t0)
+        await self.db.end_shift(guild_id, user_id, t0 + timedelta(minutes=15))
+
+        # 2. Yönetici 60 dakika (3600 sn) silmeyi denesin (mevcuttan fazla)
+        success, result, msg = await self.db.adjust_user_shift_duration(
+            guild_id=guild_id,
+            user_id=user_id,
+            user_name=user_name,
+            adjustment_minutes=60,
+            action_type="deduct",
+            admin_name="AdminTest"
+        )
+        self.assertTrue(success)
+        self.assertEqual(result["old_total_seconds"], 900)
+        self.assertEqual(result["new_total_seconds"], 0)
+        self.assertEqual(result["delta_seconds"], -900)
+
+        stats = await self.db.get_user_stats(guild_id, user_id)
+        self.assertEqual(stats["total_duration"], 0)
+
+        # 3. Geçersiz parametreler kontrolü
+        err_success, _, _ = await self.db.adjust_user_shift_duration(guild_id, user_id, user_name, 0, "add", "Admin")
+        self.assertFalse(err_success)
+
+        err_type_success, _, _ = await self.db.adjust_user_shift_duration(guild_id, user_id, user_name, 10, "invalid", "Admin")
+        self.assertFalse(err_type_success)
+
     def test_duration_formatter(self):
         """Formatlayıcı metin testi."""
         self.assertEqual(format_duration(0), "0 sn")
@@ -304,5 +404,6 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

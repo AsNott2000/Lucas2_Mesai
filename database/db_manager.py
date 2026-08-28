@@ -203,15 +203,16 @@ class DatabaseManager:
                 # Kullanıcının genel toplam istatistiklerini hesapla
                 async with conn.execute(
                     """
-                    SELECT COUNT(*) as total_shifts, COALESCE(SUM(duration_seconds), 0) as total_seconds
+                    SELECT COUNT(CASE WHEN status != 'MANUAL_ADJUST' THEN 1 END) as total_shifts,
+                           COALESCE(SUM(duration_seconds), 0) as total_seconds
                     FROM shifts
-                    WHERE guild_id = ? AND user_id = ? AND status IN ('COMPLETED', 'FORCE_CLOSED', 'AFK_CLOSED')
+                    WHERE guild_id = ? AND user_id = ? AND status IN ('COMPLETED', 'FORCE_CLOSED', 'AFK_CLOSED', 'MANUAL_ADJUST')
                     """,
                     (guild_id, user_id)
                 ) as cur_stats:
                     stats_row = await cur_stats.fetchone()
                     total_shifts = stats_row["total_shifts"] if stats_row else 1
-                    total_seconds = stats_row["total_seconds"] if stats_row else duration_seconds
+                    total_seconds = max(0, stats_row["total_seconds"]) if stats_row else duration_seconds
 
                 result_data = {
                     "id": shift_id,
@@ -271,15 +272,16 @@ class DatabaseManager:
                 # Kullanıcının genel toplam istatistiklerini hesapla
                 async with conn.execute(
                     """
-                    SELECT COUNT(*) as total_shifts, COALESCE(SUM(duration_seconds), 0) as total_seconds
+                    SELECT COUNT(CASE WHEN status != 'MANUAL_ADJUST' THEN 1 END) as total_shifts,
+                           COALESCE(SUM(duration_seconds), 0) as total_seconds
                     FROM shifts
-                    WHERE guild_id = ? AND user_id = ? AND status IN ('COMPLETED', 'FORCE_CLOSED', 'AFK_CLOSED')
+                    WHERE guild_id = ? AND user_id = ? AND status IN ('COMPLETED', 'FORCE_CLOSED', 'AFK_CLOSED', 'MANUAL_ADJUST')
                     """,
                     (guild_id, user_id)
                 ) as cur_stats:
                     stats_row = await cur_stats.fetchone()
                     total_shifts = stats_row["total_shifts"] if stats_row else 1
-                    total_seconds = stats_row["total_seconds"] if stats_row else final_duration_seconds
+                    total_seconds = max(0, stats_row["total_seconds"]) if stats_row else final_duration_seconds
 
                 result_data = {
                     "id": shift_id,
@@ -379,18 +381,27 @@ class DatabaseManager:
                 SELECT 
                     user_id,
                     user_name,
-                    COUNT(id) as shift_count,
+                    COUNT(CASE WHEN status != 'MANUAL_ADJUST' THEN 1 END) as shift_count,
                     COALESCE(SUM(duration_seconds), 0) as total_duration,
                     MAX(COALESCE(end_time, start_time)) as last_active
                 FROM shifts
-                WHERE guild_id = ? AND status IN ('COMPLETED', 'FORCE_CLOSED', 'AFK_CLOSED')
+                WHERE guild_id = ? AND status IN ('COMPLETED', 'FORCE_CLOSED', 'AFK_CLOSED', 'MANUAL_ADJUST')
                 GROUP BY user_id
                 ORDER BY total_duration DESC
                 """,
                 (guild_id,)
             ) as cursor:
                 rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+                return [
+                    {
+                        "user_id": row["user_id"],
+                        "user_name": row["user_name"],
+                        "shift_count": row["shift_count"],
+                        "total_duration": max(0, row["total_duration"]),
+                        "last_active": row["last_active"]
+                    }
+                    for row in rows
+                ]
 
     async def get_user_stats(self, guild_id: int, user_id: int) -> Dict[str, Any]:
         """Tek bir personelin genel istatistiklerini ve aktif durumunu döndürür."""
@@ -400,11 +411,11 @@ class DatabaseManager:
             async with conn.execute(
                 """
                 SELECT 
-                    COUNT(id) as shift_count,
+                    COUNT(CASE WHEN status != 'MANUAL_ADJUST' THEN 1 END) as shift_count,
                     COALESCE(SUM(duration_seconds), 0) as total_duration,
                     MAX(end_time) as last_ended
                 FROM shifts
-                WHERE guild_id = ? AND user_id = ? AND status IN ('COMPLETED', 'FORCE_CLOSED', 'AFK_CLOSED')
+                WHERE guild_id = ? AND user_id = ? AND status IN ('COMPLETED', 'FORCE_CLOSED', 'AFK_CLOSED', 'MANUAL_ADJUST')
                 """,
                 (guild_id, user_id)
             ) as cursor:
@@ -413,7 +424,7 @@ class DatabaseManager:
                     "is_active": active is not None,
                     "active_shift": active,
                     "total_shifts": row["shift_count"] if row else 0,
-                    "total_duration": row["total_duration"] if row else 0,
+                    "total_duration": max(0, row["total_duration"]) if row else 0,
                     "last_ended": row["last_ended"] if row else None,
                 }
 
@@ -537,6 +548,94 @@ class DatabaseManager:
             ) as cursor:
                 rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
+
+    async def adjust_user_shift_duration(
+        self,
+        guild_id: int,
+        user_id: int,
+        user_name: str,
+        adjustment_minutes: int,
+        action_type: str,
+        admin_name: str,
+        reason: Optional[str] = None
+    ) -> Tuple[bool, Dict[str, Any], str]:
+        """
+        Yetkili tarafından bir personelin toplam mesai süresine manuel süre ekler veya süresinden düşer.
+        Süre silme işleminde toplam süre asla negatif olamaz (en az 0 sn).
+        """
+        if adjustment_minutes <= 0:
+            return False, {}, "Düzenlenecek süre 0'dan büyük olmalıdır."
+
+        action_type = action_type.lower()
+        if action_type not in ("add", "deduct"):
+            return False, {}, "Geçersiz işlem tipi. 'add' veya 'deduct' olmalıdır."
+
+        adjustment_seconds = adjustment_minutes * 60
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+
+        async with self._lock:
+            # 1. Kullanıcının mevcut toplam süresini hesapla
+            async with aiosqlite.connect(self.db_path) as conn:
+                conn.row_factory = aiosqlite.Row
+                async with conn.execute(
+                    """
+                    SELECT COALESCE(SUM(duration_seconds), 0) as total_seconds
+                    FROM shifts
+                    WHERE guild_id = ? AND user_id = ? AND status IN ('COMPLETED', 'FORCE_CLOSED', 'AFK_CLOSED', 'MANUAL_ADJUST')
+                    """,
+                    (guild_id, user_id)
+                ) as cursor:
+                    row = await cursor.fetchone()
+                    current_total = max(0, row["total_seconds"]) if row else 0
+
+                # 2. İşlem tipine göre delta ve yeni toplamı hesapla
+                if action_type == "add":
+                    delta_seconds = adjustment_seconds
+                    new_total_seconds = current_total + delta_seconds
+                    note_prefix = f"Manuel Süre Ekleme (+{adjustment_minutes} dk)"
+                else:  # deduct
+                    if current_total <= 0:
+                        delta_seconds = 0
+                        new_total_seconds = 0
+                    elif adjustment_seconds >= current_total:
+                        delta_seconds = -current_total
+                        new_total_seconds = 0
+                    else:
+                        delta_seconds = -adjustment_seconds
+                        new_total_seconds = current_total - adjustment_seconds
+                    note_prefix = f"Manuel Süre Düşürme (-{adjustment_minutes} dk)"
+
+                note = f"{note_prefix} | Yetkili: {admin_name}"
+                if reason and reason.strip() and reason.strip() != "Belirtilmedi":
+                    note += f" | Sebep: {reason.strip()}"
+
+                # 3. Ayarlama kaydını shifts tablosuna ekle
+                await conn.execute(
+                    """
+                    INSERT INTO shifts (
+                        guild_id, user_id, user_name, start_time, end_time,
+                        duration_seconds, status, note, created_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, 'MANUAL_ADJUST', ?, datetime('now'))
+                    """,
+                    (guild_id, user_id, user_name, now_iso, now_iso, delta_seconds, note)
+                )
+                await conn.commit()
+
+            result_data = {
+                "user_id": user_id,
+                "user_name": user_name,
+                "action_type": action_type,
+                "adjustment_minutes": adjustment_minutes,
+                "delta_seconds": delta_seconds,
+                "old_total_seconds": current_total,
+                "new_total_seconds": new_total_seconds,
+                "admin_name": admin_name,
+                "reason": reason or "Belirtilmedi",
+                "adjusted_at": now
+            }
+            return True, result_data, "Mesai süresi başarıyla güncellendi."
 
     async def reset_guild_shifts(self, guild_id: int) -> int:
         """
