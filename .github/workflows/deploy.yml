@@ -82,28 +82,30 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USERNAME }}
           password: ${{ secrets.SSH_PASSWORD }}
-          key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
           timeout: 60s
-          command_timeout: 15m
+          command_timeout: 10m
           script_stop: true
           script: |
-            # Sunucudaki proje çalışma dizinine git
-            cd ${{ secrets.WORK_DIR || '/opt/Lucas2_Mesai' }}
+            set -e
+            echo "🚀 [1/5] Sunucu çalışma dizinine geçiliyor..."
+            TARGET_DIR="${{ secrets.WORK_DIR || '/opt/Lucas2_Mesai' }}"
+            mkdir -p "$TARGET_DIR"
+            cd "$TARGET_DIR"
 
-            # Eğer dizin bir Git deposu ise son değişiklikleri çek
+            echo "📥 [2/5] Git deposu kontrol ediliyor..."
             if [ -d ".git" ]; then
-              echo "📥 Sunucudaki Git deposu güncelleniyor (git pull)..."
-              git pull origin $(git branch --show-current 2>/dev/null || echo "main")
+              echo "🔄 Git deposu güncelleniyor..."
+              GIT_TERMINAL_PROMPT=0 git pull origin $(git branch --show-current 2>/dev/null || echo "main") || echo "⚠️ Git pull atlandı."
             fi
 
-            echo "📥 Docker Hub'dan en güncel imaj çekiliyor..."
+            echo "🐳 [3/5] Docker Hub'dan en güncel imaj çekiliyor..."
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/lucas2-mesai:latest
 
-            echo "🚀 Bot konteyneri güncelleniyor ve başlatılıyor..."
+            echo "🔄 [4/5] Bot konteyneri güncelleniyor ve başlatılıyor..."
             DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/lucas2-mesai:latest docker compose up -d --remove-orphans
 
-            echo "🧹 Eski ve kullanılmayan imajlar temizleniyor..."
+            echo "🧹 [5/5] Eski imajlar temizleniyor..."
             docker image prune -f
 
             echo "✅ Dağıtım başarıyla tamamlandı!"
