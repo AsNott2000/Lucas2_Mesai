@@ -86,7 +86,6 @@ jobs:
           timeout: 60s
           command_timeout: 10m
           script_stop: true
-          envs: DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
             set -e
             echo "🚀 [1/5] Sunucu çalışma dizinine geçiliyor..."
