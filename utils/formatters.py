@@ -78,9 +78,10 @@ def create_admin_panel_embed() -> discord.Embed:
         title="🛡️ YÖNETİCİ MESAİ KONTROL VE RAPOR PANELİ",
         description=(
             "Bu panel yalnızca yetkili yöneticilerin kullanımı içindir.\n\n"
-            "📊 **Genel Rapor Al:** Tüm personellerin toplam mesai sürelerini ve oturum sayılarını listeler.\n"
-            "🟢 **Anlık Aktif Mesailer:** Şu anda mesaisi devam eden personelleri gösterir.\n"
-            "🛑 **Tüm Mesaileri Kapat:** Açık olan tüm kullanıcı mesailerini anında sonlandırır.\n"
+            "📊 **Genel Rapor Al & Sıfırla:** Aktif mesaileri kapatır, `.txt` raporunu teslim eder ve dönemi sıfırlar.\n"
+            "🟢 **Anlık Aktif Mesailer:** Şu anda mesaisi devam eden personelleri anlık listeler.\n"
+            "🛑 **Tüm Mesaileri Kapat:** Açık olan tüm kullanıcı mesailerini onay ile sonlandırır.\n"
+            "👤 **Kişi Mesaisi Kapat:** Belirli bir personelin açık mesaisini listeden seçerek sonlandırır.\n"
         ),
         color=0x2B2D31  # Koyu Gri / Dark Slate
     )
@@ -370,6 +371,7 @@ def create_log_embed(
         "AFK_TIMEOUT": 0xE74C3C,       # Kırmızı
         "FORCE_CLOSED": 0xE67E22,      # Turuncu
         "FORCE_CLOSED_ALL": 0x992D22,  # Koyu Kırmızı
+        "REPORT_AND_RESET": 0x9B59B6,  # Mor
     }
     
     titles = {
@@ -378,6 +380,7 @@ def create_log_embed(
         "AFK_TIMEOUT": "⚠️ Mesai AFK Zaman Aşımı & Ceza ile Kapatıldı",
         "FORCE_CLOSED": "👮 Mesai Yönetici Tarafından Kapatıldı",
         "FORCE_CLOSED_ALL": "🛑 Tüm Mesailer Yönetici Tarafından Kapatıldı",
+        "REPORT_AND_RESET": "📊 Dönem Raporu Alındı & Veriler Sıfırlandı",
     }
 
     embed = discord.Embed(
@@ -385,7 +388,7 @@ def create_log_embed(
         color=colors.get(action_type, 0x5865F2)
     )
     if user:
-        embed.add_field(name="👤 Personel", value=f"{user.mention} (`{user.display_name}` - ID: `{user.id}`)", inline=False)
+        embed.add_field(name="👤 Personel / Yetkili", value=f"{user.mention} (`{user.display_name}` - ID: `{user.id}`)", inline=False)
     
     for key, value in details.items():
         embed.add_field(name=key, value=str(value), inline=True)
@@ -393,4 +396,122 @@ def create_log_embed(
     embed.set_footer(text="Lucas2 Mesai Denetim Günlüğü")
     embed.timestamp = datetime.now(timezone.utc)
     return embed
+
+def generate_shift_report_txt(
+    guild_name: str,
+    reports: List[Dict[str, Any]],
+    detailed_shifts: List[Dict[str, Any]],
+    admin_name: str,
+    report_time: Optional[datetime] = None
+) -> str:
+    """
+    Tüm personel özetlerini ve detaylı oturum dökümlerini içeren UTF-8 metin raporu üretir.
+    """
+    if report_time is None:
+        report_time = datetime.now(timezone.utc)
+    elif report_time.tzinfo is None:
+        report_time = report_time.replace(tzinfo=timezone.utc)
+
+    total_personnel = len(reports)
+    total_shifts = sum(r.get("shift_count", 0) for r in reports)
+    total_duration_sec = sum(r.get("total_duration", 0) for r in reports)
+    date_str = report_time.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    lines = []
+    lines.append("=" * 80)
+    lines.append("LUCAS2 MESAİ VE VARDİYA TAKİP SİSTEMİ — DÖNEM SONU RAPORU")
+    lines.append("=" * 80)
+    lines.append(f"Sunucu Adı          : {guild_name}")
+    lines.append(f"Rapor Tarihi        : {date_str}")
+    lines.append(f"Raporu Alan Yetkili : {admin_name}")
+    lines.append(f"Toplam Personel     : {total_personnel} kişi")
+    lines.append(f"Toplam Oturum       : {total_shifts} adet")
+    lines.append(f"Genel Toplam Süre   : {format_duration(total_duration_sec)} ({total_duration_sec} saniye)")
+    lines.append("=" * 80)
+    lines.append("")
+    lines.append("[ BÖLÜM 1: PERSONEL GENEL PERFORMANS & SIRALAMA TABLOSU ]")
+    lines.append("-" * 80)
+    lines.append(f"{'Sıra':<5} | {'Personel Adı':<22} | {'Discord ID':<20} | {'Oturum':<7} | {'Toplam Süre':<18}")
+    lines.append("-" * 80)
+
+    if not reports:
+        lines.append("Bu dönem için kayıtlı tamamlanmış personel mesaisi bulunmamaktadır.")
+    else:
+        for idx, row in enumerate(reports, 1):
+            u_name = str(row.get("user_name", "Bilinmiyor"))[:20]
+            u_id = str(row.get("user_id", ""))
+            s_count = str(row.get("shift_count", 0))
+            dur_str = format_duration(row.get("total_duration", 0))
+            lines.append(f"{idx:<5} | {u_name:<22} | {u_id:<20} | {s_count:<7} | {dur_str:<18}")
+
+    lines.append("-" * 80)
+    lines.append("")
+    lines.append("[ BÖLÜM 2: DETAYLI MESAİ OTURUM GEÇMİŞİ DÖKÜMÜ ]")
+    lines.append("-" * 80)
+    lines.append(f"{'ID':<6} | {'Personel Adı':<18} | {'Başlangıç (UTC)':<19} | {'Bitiş (UTC)':<19} | {'Süre':<14} | {'Durum':<12} | {'Not'}")
+    lines.append("-" * 80)
+
+    if not detailed_shifts:
+        lines.append("Detaylı oturum kaydı bulunmamaktadır.")
+    else:
+        for s in detailed_shifts:
+            s_id = str(s.get("id", ""))
+            u_name = str(s.get("user_name", "Bilinmiyor"))[:16]
+            start_raw = s.get("start_time", "")
+            end_raw = s.get("end_time", "")
+
+            st_dt = parse_iso_or_datetime(start_raw)
+            en_dt = parse_iso_or_datetime(end_raw)
+            st_str = st_dt.strftime("%Y-%m-%d %H:%M") if st_dt else str(start_raw)[:19]
+            en_str = en_dt.strftime("%Y-%m-%d %H:%M") if en_dt else (str(end_raw)[:19] if end_raw else "Devam Ediyor")
+
+            dur_text = format_duration(s.get("duration_seconds", 0))
+            status = str(s.get("status", ""))
+            note = str(s.get("note") or "-")
+            lines.append(f"{s_id:<6} | {u_name:<18} | {st_str:<19} | {en_str:<19} | {dur_text:<14} | {status:<12} | {note}")
+
+    lines.append("-" * 80)
+    lines.append("")
+    lines.append("=" * 80)
+    lines.append("RAPOR SONU • Veritabanı sıfırlama işlemi öncesinde sistem tarafından derlenmiştir.")
+    lines.append("=" * 80)
+
+    return "\n".join(lines)
+
+def create_report_and_reset_summary_embed(
+    admin: discord.User | discord.Member,
+    closed_active_count: int,
+    reported_user_count: int,
+    total_shifts_count: int,
+    total_duration_seconds: int,
+    deleted_records_count: int,
+    filename: str
+) -> discord.Embed:
+    """Rapor alma ve dönem sıfırlama işlemi tamamlandığında iletilen özet embed."""
+    embed = discord.Embed(
+        title="📊 Dönem Raporu Alındı & Veritabanı Sıfırlandı",
+        description=(
+            "Tüm mesai oturumları derlenmiş, ekteki rapor dosyasına aktarılmış ve "
+            "sunucu için yeni dönem başlatılarak canlı tablolar sıfırlanmıştır."
+        ),
+        color=0x2ECC71  # Yeşil
+    )
+    embed.add_field(name="👮 İşlemi Yapan Yetkili", value=admin.mention, inline=True)
+    embed.add_field(name="📄 Oluşturulan Dosya", value=f"`{filename}`", inline=True)
+    embed.add_field(name="👥 Raporlanan Personel", value=f"**{reported_user_count}** kişi", inline=True)
+    embed.add_field(name="📈 Toplam Oturum Sayısı", value=f"**{total_shifts_count}** oturum", inline=True)
+    embed.add_field(name="⏳ Birikmiş Toplam Süre", value=f"**{format_duration(total_duration_seconds)}**", inline=True)
+    embed.add_field(name="🧹 Temizlenen Kayıt Sayısı", value=f"**{deleted_records_count}** satır", inline=True)
+
+    if closed_active_count > 0:
+        embed.add_field(
+            name="⚠️ Otomatik Kapatılan Aktif Mesailer",
+            value=f"Rapor alınırken açık olan **{closed_active_count}** personelin mesaisi otomatik olarak kapatılıp rapora dahil edildi.",
+            inline=False
+        )
+
+    embed.set_footer(text="Lucas2 Yönetim Paneli • Canlı Paneller Sıfırlandı")
+    embed.timestamp = datetime.now(timezone.utc)
+    return embed
+
 

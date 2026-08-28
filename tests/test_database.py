@@ -236,6 +236,64 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stats_short["total_duration"], 0)
         self.assertEqual(stats_short["total_shifts"], 1)
 
+    async def test_get_guild_detailed_shifts_and_reset(self):
+        """Detaylı oturum sorgusu ve veritabanı sıfırlama testi."""
+        guild_id = 4444
+        u1, u2 = 401, 402
+        t0 = datetime(2026, 8, 27, 8, 0, 0, tzinfo=timezone.utc)
+
+        # Oturumlar oluştur
+        await self.db.start_shift(guild_id, u1, "UserAlpha", t0)
+        await self.db.end_shift(guild_id, u1, t0 + timedelta(hours=1))
+
+        await self.db.start_shift(guild_id, u2, "UserBeta", t0 + timedelta(hours=1))
+        await self.db.end_shift(guild_id, u2, t0 + timedelta(hours=3))
+
+        # Detaylı dökümü çek
+        detailed = await self.db.get_guild_detailed_shifts(guild_id)
+        self.assertEqual(len(detailed), 2)
+        self.assertEqual(detailed[0]["user_name"], "UserAlpha")
+        self.assertEqual(detailed[0]["duration_seconds"], 3600)
+        self.assertEqual(detailed[1]["user_name"], "UserBeta")
+        self.assertEqual(detailed[1]["duration_seconds"], 7200)
+
+        # Veritabanını sıfırla
+        deleted_count = await self.db.reset_guild_shifts(guild_id)
+        self.assertEqual(deleted_count, 2)
+
+        # Sıfırlama sonrası kontroller
+        detailed_after = await self.db.get_guild_detailed_shifts(guild_id)
+        self.assertEqual(len(detailed_after), 0)
+        reports_after = await self.db.get_guild_report(guild_id)
+        self.assertEqual(len(reports_after), 0)
+
+    def test_generate_shift_report_txt(self):
+        """TXT rapor formatlayıcısının hatasız metin ürettiğini doğrula."""
+        from utils.formatters import generate_shift_report_txt
+        reports = [
+            {"user_id": 111, "user_name": "Ahmet", "shift_count": 2, "total_duration": 7200, "last_active": "2026-08-27T10:00:00+00:00"},
+            {"user_id": 222, "user_name": "Mehmet", "shift_count": 1, "total_duration": 3600, "last_active": "2026-08-27T12:00:00+00:00"},
+        ]
+        detailed = [
+            {"id": 1, "user_id": 111, "user_name": "Ahmet", "start_time": "2026-08-27T08:00:00+00:00", "end_time": "2026-08-27T09:00:00+00:00", "duration_seconds": 3600, "status": "COMPLETED", "note": None},
+            {"id": 2, "user_id": 111, "user_name": "Ahmet", "start_time": "2026-08-27T09:00:00+00:00", "end_time": "2026-08-27T10:00:00+00:00", "duration_seconds": 3600, "status": "COMPLETED", "note": None},
+            {"id": 3, "user_id": 222, "user_name": "Mehmet", "start_time": "2026-08-27T11:00:00+00:00", "end_time": "2026-08-27T12:00:00+00:00", "duration_seconds": 3600, "status": "COMPLETED", "note": None},
+        ]
+        txt = generate_shift_report_txt(
+            guild_name="Lucas2 Test Sunucusu",
+            reports=reports,
+            detailed_shifts=detailed,
+            admin_name="SuperAdmin",
+            report_time=datetime(2026, 8, 27, 12, 30, 0, tzinfo=timezone.utc)
+        )
+        self.assertIn("LUCAS2 MESAİ VE VARDİYA TAKİP SİSTEMİ", txt)
+        self.assertIn("Lucas2 Test Sunucusu", txt)
+        self.assertIn("Ahmet", txt)
+        self.assertIn("Mehmet", txt)
+        self.assertIn("BÖLÜM 1: PERSONEL GENEL PERFORMANS", txt)
+        self.assertIn("BÖLÜM 2: DETAYLI MESAİ OTURUM GEÇMİŞİ", txt)
+        self.assertIn("RAPOR SONU", txt)
+
     def test_duration_formatter(self):
         """Formatlayıcı metin testi."""
         self.assertEqual(format_duration(0), "0 sn")
@@ -246,4 +304,5 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
 

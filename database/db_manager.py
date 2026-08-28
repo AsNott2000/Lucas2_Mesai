@@ -509,5 +509,48 @@ class DatabaseManager:
 
             return len(closed_records), closed_records
 
+    async def get_guild_detailed_shifts(self, guild_id: int) -> List[Dict[str, Any]]:
+        """
+        Sunucudaki tüm mesai oturumlarının (kullanıcı, başlangıç/bitiş, süre, durum, not)
+        detaylı kayıtlarını kronolojik ve kullanıcı bazlı sıralı döndürür.
+        """
+        async with aiosqlite.connect(self.db_path) as conn:
+            conn.row_factory = aiosqlite.Row
+            async with conn.execute(
+                """
+                SELECT 
+                    id,
+                    guild_id,
+                    user_id,
+                    user_name,
+                    start_time,
+                    end_time,
+                    duration_seconds,
+                    status,
+                    note,
+                    created_at
+                FROM shifts
+                WHERE guild_id = ?
+                ORDER BY user_name ASC, id ASC
+                """,
+                (guild_id,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+
+    async def reset_guild_shifts(self, guild_id: int) -> int:
+        """
+        Sunucudaki tüm mesai kayıtlarını kalıcı olarak siler ve dönemi sıfırlar.
+        Silinen toplam kayıt sayısını döndürür.
+        """
+        async with self._lock:
+            async with aiosqlite.connect(self.db_path) as conn:
+                cursor = await conn.execute(
+                    "DELETE FROM shifts WHERE guild_id = ?",
+                    (guild_id,)
+                )
+                await conn.commit()
+                return cursor.rowcount
+
 # Singleton veritabanı nesnesi
 db = DatabaseManager()

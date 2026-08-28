@@ -16,6 +16,8 @@ from .formatters import (
     create_afk_verified_embed,
     create_afk_timeout_embed,
     create_log_embed,
+    generate_shift_report_txt,
+    create_report_and_reset_summary_embed,
 )
 from .permissions import has_admin_permission
 
@@ -36,6 +38,8 @@ __all__ = [
     "create_afk_verified_embed",
     "create_afk_timeout_embed",
     "create_log_embed",
+    "generate_shift_report_txt",
+    "create_report_and_reset_summary_embed",
     "has_admin_permission",
 ]
 
