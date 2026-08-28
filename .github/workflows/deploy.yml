@@ -86,6 +86,7 @@ jobs:
           timeout: 60s
           command_timeout: 10m
           script_stop: true
+          envs: DOCKERHUB_USERNAME,DOCKERHUB_TOKEN
           script: |
             set -e
             echo "🚀 [1/5] Sunucu çalışma dizinine geçiliyor..."
@@ -99,13 +100,18 @@ jobs:
               GIT_TERMINAL_PROMPT=0 git pull origin $(git branch --show-current 2>/dev/null || echo "main") || echo "⚠️ Git pull atlandı."
             fi
 
-            echo "🐳 [3/5] Docker Hub'dan en güncel imaj çekiliyor..."
+            echo "🔑 [3/5] Docker Hub'a giriş yapılıyor..."
+            if [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+              echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            fi
+
+            echo "🐳 [4/5] Docker Hub'dan en güncel imaj çekiliyor..."
             docker pull ${{ secrets.DOCKERHUB_USERNAME }}/lucas2-mesai:latest
 
-            echo "🔄 [4/5] Bot konteyneri güncelleniyor ve başlatılıyor..."
+            echo "🔄 [5/5] Bot konteyneri güncelleniyor ve başlatılıyor..."
             DOCKER_IMAGE=${{ secrets.DOCKERHUB_USERNAME }}/lucas2-mesai:latest docker compose up -d --remove-orphans
 
-            echo "🧹 [5/5] Eski imajlar temizleniyor..."
+            echo "🧹 Eski imajlar temizleniyor..."
             docker image prune -f
 
             echo "✅ Dağıtım başarıyla tamamlandı!"
