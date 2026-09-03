@@ -394,6 +394,55 @@ class TestDatabaseAndLogic(unittest.IsolatedAsyncioTestCase):
         err_type_success, _, _ = await self.db.adjust_user_shift_duration(guild_id, user_id, user_name, 10, "invalid", "Admin")
         self.assertFalse(err_type_success)
 
+    async def test_user_stats_for_shift_duration_query(self):
+        """Kullanıcının mesai süresi sorgulama mantığı ve aktif mesai entegrasyonu testi."""
+        guild_id = 9911
+        user_id = 8822
+        user_name = "SorgulayanPersonel"
+
+        # 1. Hiç kaydı olmayan kullanıcı
+        stats_empty = await self.db.get_user_stats(guild_id, user_id)
+        self.assertFalse(stats_empty["is_active"])
+        self.assertIsNone(stats_empty["active_shift"])
+        self.assertEqual(stats_empty["total_shifts"], 0)
+        self.assertEqual(stats_empty["total_duration"], 0)
+
+        # 2. Geçmişte 1 saatlik (3600 sn) tamamlanmış mesai ekle
+        t0 = datetime.now(timezone.utc) - timedelta(hours=3)
+        await self.db.start_shift(guild_id, user_id, user_name, t0)
+        await self.db.end_shift(guild_id, user_id, t0 + timedelta(hours=1))
+
+        stats_completed = await self.db.get_user_stats(guild_id, user_id)
+        self.assertFalse(stats_completed["is_active"])
+        self.assertEqual(stats_completed["total_shifts"], 1)
+        self.assertEqual(stats_completed["total_duration"], 3600)
+
+        # 3. Yeni bir mesai başlat (30 dakika önce başlamış olsun)
+        t_active = datetime.now(timezone.utc) - timedelta(minutes=30)
+        await self.db.start_shift(guild_id, user_id, user_name, t_active)
+
+        stats_active = await self.db.get_user_stats(guild_id, user_id)
+        self.assertTrue(stats_active["is_active"])
+        self.assertIsNotNone(stats_active["active_shift"])
+        self.assertEqual(stats_active["total_shifts"], 1)
+        self.assertEqual(stats_active["total_duration"], 3600)
+
+        # Anlık hesaplama kontrolü: Aktif mesai kapatılmadan süre eklenmeli
+        start_dt = datetime.fromisoformat(stats_active["active_shift"]["start_time"])
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+        active_elapsed = max(0, int((datetime.now(timezone.utc) - start_dt).total_seconds()))
+        cumulative_duration = stats_active["total_duration"] + active_elapsed
+
+        # 3600 sn (geçmiş) + ~1800 sn (aktif) = ~5400 sn
+        self.assertGreaterEqual(cumulative_duration, 5390)
+        self.assertLessEqual(cumulative_duration, 5450)
+
+        # Aktif mesainin kapatılmadığını doğrula
+        check_active = await self.db.get_active_shift(guild_id, user_id)
+        self.assertIsNotNone(check_active)
+        self.assertEqual(check_active["status"], "ACTIVE")
+
     def test_duration_formatter(self):
         """Formatlayıcı metin testi."""
         self.assertEqual(format_duration(0), "0 sn")

@@ -6,11 +6,14 @@ from services.panel_manager import panel_manager
 from utils.formatters import (
     create_shift_started_embed,
     create_shift_ended_embed,
+    create_user_shift_duration_embed,
     create_warning_embed,
     create_error_embed,
     create_log_embed,
     format_duration,
+    format_duration_detailed,
     get_discord_timestamp,
+    parse_iso_or_datetime,
 )
 
 logger = logging.getLogger("Lucas2MesaiBot.ShiftView")
@@ -137,4 +140,60 @@ class ShiftView(discord.ui.View):
                 message="Şu anda aktif veya devam eden bir mesai kaydınız bulunmuyor.\nÖnce **'Mesai Başlat'** butonuna basarak yeni bir mesai başlatabilirsiniz."
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(
+        label="Mesai Süremi Öğren",
+        style=discord.ButtonStyle.primary,
+        emoji="⏱️",
+        custom_id="btn_check_my_shift_duration"
+    )
+    async def check_shift_duration_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Kullanıcının toplam mesai süresini ve aktif durumunu anlık sorgulayan buton aksiyonu."""
+        guild = interaction.guild
+        if not guild:
+            await interaction.response.send_message(
+                embed=create_error_embed("Hata", "Bu buton yalnızca bir sunucu içerisinde kullanılabilir."),
+                ephemeral=True
+            )
+            return
+
+        user = interaction.user
+        stats = await db.get_user_stats(guild_id=guild.id, user_id=user.id)
+
+        is_active = stats.get("is_active", False)
+        active_shift = stats.get("active_shift")
+        completed_shifts = stats.get("total_shifts", 0)
+        past_duration = stats.get("total_duration", 0)
+
+        # Veritabanında hiç mesai kaydı bulunmayan kullanıcılar için kontrol
+        if not is_active and completed_shifts == 0 and past_duration == 0:
+            embed = create_warning_embed(
+                title="Mesai Kaydı Bulunamadı",
+                message="Henüz kayıtlı bir mesai geçmişiniz bulunmamaktadır.\n\nMesaiye başlamak için lütfen **'Mesai Başlat'** butonunu kullanınız."
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+
+        active_session_seconds = 0
+        active_start_dt = None
+        if is_active and active_shift:
+            start_time_raw = active_shift.get("start_time")
+            active_start_dt = parse_iso_or_datetime(start_time_raw)
+            if active_start_dt:
+                if active_start_dt.tzinfo is None:
+                    active_start_dt = active_start_dt.replace(tzinfo=timezone.utc)
+                now = datetime.now(timezone.utc)
+                active_session_seconds = max(0, int((now - active_start_dt).total_seconds()))
+
+        total_duration_seconds = past_duration + active_session_seconds
+
+        embed = create_user_shift_duration_embed(
+            user=user,
+            total_duration_seconds=total_duration_seconds,
+            completed_shifts_count=completed_shifts,
+            is_active=is_active,
+            active_session_seconds=active_session_seconds,
+            active_start_time=active_start_dt
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 

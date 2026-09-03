@@ -1,4 +1,6 @@
 import unittest
+from datetime import datetime, timezone, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 import discord
 from views.shift_view import ShiftView
 from views.admin_view import (
@@ -24,9 +26,11 @@ from utils.formatters import (
     create_afk_verified_embed,
     create_afk_timeout_embed,
     create_report_and_reset_summary_embed,
+    create_user_shift_duration_embed,
     create_warning_embed,
     create_error_embed,
     create_log_embed,
+    format_duration_detailed,
 )
 
 class TestViewsAndEmbeds(unittest.TestCase):
@@ -37,9 +41,16 @@ class TestViewsAndEmbeds(unittest.TestCase):
         view = ShiftView()
         self.assertIsNone(view.timeout, "ShiftView kalıcı olması için timeout=None olmalıdır.")
 
-        custom_ids = [item.custom_id for item in view.children if isinstance(item, discord.ui.Button)]
-        self.assertIn("btn_start_shift", custom_ids)
-        self.assertIn("btn_end_shift", custom_ids)
+        buttons_by_id = {item.custom_id: item for item in view.children if isinstance(item, discord.ui.Button)}
+        self.assertIn("btn_start_shift", buttons_by_id)
+        self.assertIn("btn_end_shift", buttons_by_id)
+        self.assertIn("btn_check_my_shift_duration", buttons_by_id)
+
+        # Mesai Süremi Öğren butonunun özelliklerini test et
+        duration_btn = buttons_by_id["btn_check_my_shift_duration"]
+        self.assertEqual(duration_btn.label, "Mesai Süremi Öğren")
+        self.assertEqual(duration_btn.style, discord.ButtonStyle.primary)
+        self.assertEqual(str(duration_btn.emoji), "⏱️")
 
     def test_admin_view_properties(self):
         """AdminView'in timeout ve custom_id'lerini doğrula."""
@@ -229,6 +240,127 @@ class TestViewsAndEmbeds(unittest.TestCase):
         self.assertIn("Ham Oturum Süresi", afk_to.description)
         self.assertIn("Uygulanan Ceza", afk_to.description)
         self.assertIn("Son 61 dk silindi", afk_to.description)
+
+    def test_format_duration_detailed(self):
+        """format_duration_detailed fonksiyonunun gün/saat/dakika çıktılarını test et."""
+        self.assertEqual(format_duration_detailed(0), "0 Dakika")
+        self.assertEqual(format_duration_detailed(45), "45 Saniye")
+        self.assertEqual(format_duration_detailed(120), "2 Dakika")
+        self.assertEqual(format_duration_detailed(3660), "1 Saat, 1 Dakika")
+        self.assertEqual(format_duration_detailed(90060), "1 Gün, 1 Saat, 1 Dakika")
+
+    def test_create_user_shift_duration_embed(self):
+        """create_user_shift_duration_embed alanlarının ve aktif durumunun test edilmesi."""
+        mock_user = MagicMock(spec=discord.User)
+        mock_user.id = 999
+        mock_user.display_name = "Ahmet"
+        mock_user.display_avatar.url = "https://example.com/avatar.png"
+
+        # 1. Aktif mesai varken
+        embed_active = create_user_shift_duration_embed(
+            user=mock_user,
+            total_duration_seconds=7300,
+            completed_shifts_count=3,
+            is_active=True,
+            active_session_seconds=1800,
+            active_start_time=datetime(2026, 9, 3, 18, 0, 0, tzinfo=timezone.utc)
+        )
+        self.assertIn("KİŞİSEL MESAİ SÜRESİ", embed_active.title)
+        self.assertIn("Ahmet", embed_active.description)
+        field_dict_active = {f.name: f.value for f in embed_active.fields}
+        self.assertIn("🏆 Toplam Mesai Süresi", field_dict_active)
+        self.assertIn("2 Saat, 1 Dakika", field_dict_active["🏆 Toplam Mesai Süresi"])
+        self.assertIn("Aktif Mesaidesiniz", field_dict_active["📊 Mevcut Durum"])
+        self.assertIn("30 Dakika", field_dict_active["📊 Mevcut Durum"])
+        self.assertIn("**3** adet", field_dict_active["📈 Tamamlanan Oturum Sayısı"])
+
+        # 2. Aktif mesai yokken
+        embed_inactive = create_user_shift_duration_embed(
+            user=mock_user,
+            total_duration_seconds=3600,
+            completed_shifts_count=1,
+            is_active=False
+        )
+        field_dict_inactive = {f.name: f.value for f in embed_inactive.fields}
+        self.assertIn("Şu an aktif mesaide değilsiniz", field_dict_inactive["📊 Mevcut Durum"])
+        self.assertIn("1 Saat, 0 Dakika", field_dict_inactive["🏆 Toplam Mesai Süresi"])
+        self.assertIn("**1** adet", field_dict_inactive["📈 Tamamlanan Oturum Sayısı"])
+
+
+class TestShiftViewAsync(unittest.IsolatedAsyncioTestCase):
+    """ShiftView asenkron buton etkileşim testleri."""
+
+    async def test_check_shift_duration_button_no_records(self):
+        """Kayıtlı mesaisi olmayan kullanıcıya doğru uyarının döndüğünü test et."""
+        view = ShiftView()
+        mock_interaction = MagicMock(spec=discord.Interaction)
+        mock_interaction.guild = MagicMock(spec=discord.Guild)
+        mock_interaction.guild.id = 12345
+        mock_interaction.user = MagicMock(spec=discord.Member)
+        mock_interaction.user.id = 67890
+        mock_interaction.user.display_name = "YeniPersonel"
+        mock_interaction.response.send_message = AsyncMock()
+
+        with patch("views.shift_view.db.get_user_stats", new_callable=AsyncMock) as mock_stats:
+            mock_stats.return_value = {
+                "is_active": False,
+                "active_shift": None,
+                "total_shifts": 0,
+                "total_duration": 0,
+                "last_ended": None
+            }
+
+            await view.check_shift_duration_button.callback(mock_interaction)
+
+            mock_interaction.response.send_message.assert_called_once()
+            args, kwargs = mock_interaction.response.send_message.call_args
+            self.assertTrue(kwargs.get("ephemeral"))
+            embed = kwargs.get("embed")
+            self.assertIsNotNone(embed)
+            self.assertIn("Mesai Kaydı Bulunamadı", embed.title)
+            self.assertIn("Henüz kayıtlı bir mesai geçmişiniz bulunmamaktadır.", embed.description)
+
+    async def test_check_shift_duration_button_with_active_shift(self):
+        """Aktif mesaisi olan kullanıcının anlık süresinin kümülatif toplama eklendiğini test et."""
+        view = ShiftView()
+        mock_interaction = MagicMock(spec=discord.Interaction)
+        mock_interaction.guild = MagicMock(spec=discord.Guild)
+        mock_interaction.guild.id = 12345
+        mock_interaction.user = MagicMock(spec=discord.Member)
+        mock_interaction.user.id = 67890
+        mock_interaction.user.display_name = "AktifPersonel"
+        mock_interaction.response.send_message = AsyncMock()
+
+        start_time = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+
+        with patch("views.shift_view.db.get_user_stats", new_callable=AsyncMock) as mock_stats:
+            mock_stats.return_value = {
+                "is_active": True,
+                "active_shift": {
+                    "id": 1,
+                    "guild_id": 12345,
+                    "user_id": 67890,
+                    "start_time": start_time,
+                    "status": "ACTIVE"
+                },
+                "total_shifts": 2,
+                "total_duration": 3600,
+                "last_ended": None
+            }
+
+            await view.check_shift_duration_button.callback(mock_interaction)
+
+            mock_interaction.response.send_message.assert_called_once()
+            args, kwargs = mock_interaction.response.send_message.call_args
+            self.assertTrue(kwargs.get("ephemeral"))
+            embed = kwargs.get("embed")
+            self.assertIsNotNone(embed)
+            self.assertIn("KİŞİSEL MESAİ SÜRESİ", embed.title)
+            fields = {f.name: f.value for f in embed.fields}
+            self.assertIn("Aktif Mesaidesiniz", fields["📊 Mevcut Durum"])
+            self.assertIn("Saat", fields["🏆 Toplam Mesai Süresi"])
+            self.assertIn("**2** adet", fields["📈 Tamamlanan Oturum Sayısı"])
+
 
 if __name__ == "__main__":
     unittest.main()

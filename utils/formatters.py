@@ -21,6 +21,33 @@ def format_duration(seconds: int) -> str:
 
     return " ".join(parts)
 
+def format_duration_detailed(seconds: int) -> str:
+    """
+    Süreyi gün, saat ve dakika cinsinden okunabilir metne dönüştürür.
+    Örn: '1 Gün, 4 Saat, 20 Dakika' veya '2 Saat, 15 Dakika' veya '45 Dakika'.
+    """
+    if seconds < 0:
+        seconds = 0
+
+    days = seconds // 86400
+    hours = (seconds % 86400) // 3600
+    minutes = (seconds % 3600) // 60
+    secs = seconds % 60
+
+    if days > 0:
+        return f"{days} Gün, {hours} Saat, {minutes} Dakika"
+
+    if hours > 0:
+        return f"{hours} Saat, {minutes} Dakika"
+
+    if minutes > 0:
+        return f"{minutes} Dakika"
+
+    if secs > 0:
+        return f"{secs} Saniye"
+
+    return "0 Dakika"
+
 def to_unix_timestamp(dt: datetime) -> int:
     """Datetime nesnesini Unix timestamp (saniye) değerine dönüştürür."""
     if dt.tzinfo is None:
@@ -55,7 +82,8 @@ def create_shift_panel_embed() -> discord.Embed:
         description=(
             "Aşağıdaki butonları kullanarak mesainizi başlatabilir veya sonlandırabilirsiniz.\n\n"
             "🟢 **Mesai Başlat:** Vardiyanızı başlatır ve çalışma saatinizi kaydeder.\n"
-            "🔴 **Mesai Bitir:** Aktif vardiyanızı sonlandırır ve toplam süreyi raporlar.\n\n"
+            "🔴 **Mesai Bitir:** Aktif vardiyanızı sonlandırır ve toplam süreyi raporlar.\n"
+            "🔵 **Mesai Süremi Öğren:** Toplam mesai sürenizi ve anlık durumunuzu sorgular.\n\n"
             "📌 *Not: Lütfen mesaiye başladığınızda ve ayrılırken butonları kullanmayı unutmayınız.*"
         ),
         color=0x5865F2  # Discord Blurple
@@ -143,6 +171,60 @@ def create_shift_ended_embed(
         inline=True
     )
     embed.set_footer(text="Kayıt veritabanına işlendi.")
+    return embed
+
+def create_user_shift_duration_embed(
+    user: discord.User | discord.Member,
+    total_duration_seconds: int,
+    completed_shifts_count: int,
+    is_active: bool,
+    active_session_seconds: Optional[int] = None,
+    active_start_time: Optional[datetime] = None
+) -> discord.Embed:
+    """
+    Kullanıcının 'Mesai Süremi Öğren' butonuna bastığında gördüğü kişisel özet embedi.
+    """
+    embed = discord.Embed(
+        title="⏱️ KİŞİSEL MESAİ SÜRESİ BİLGİLENDİRMESİ",
+        description=f"Sayın **{user.display_name}**, güncel mesai ve oturum durumunuz aşağıda belirtilmiştir:\n",
+        color=0x3498DB  # Discord Primary Blue
+    )
+
+    # 1. Toplam Mesai Süresi
+    embed.add_field(
+        name="🏆 Toplam Mesai Süresi",
+        value=f"**{format_duration_detailed(total_duration_seconds)}**",
+        inline=False
+    )
+
+    # 2. Mevcut Durum
+    if is_active:
+        session_text = format_duration_detailed(active_session_seconds or 0)
+        status_value = f"🟢 **Aktif Mesaidesiniz** (Şu anki oturum: {session_text})"
+        if active_start_time:
+            unix = to_unix_timestamp(active_start_time)
+            status_value += f"\n🕒 **Başlangıç:** <t:{unix}:T> (<t:{unix}:R>)"
+    else:
+        status_value = "🔴 **Şu an aktif mesaide değilsiniz.**"
+
+    embed.add_field(
+        name="📊 Mevcut Durum",
+        value=status_value,
+        inline=False
+    )
+
+    # 3. Tamamlanan Oturum Sayısı
+    embed.add_field(
+        name="📈 Tamamlanan Oturum Sayısı",
+        value=f"**{completed_shifts_count}** adet",
+        inline=True
+    )
+
+    if hasattr(user, "display_avatar") and user.display_avatar:
+        embed.set_thumbnail(url=user.display_avatar.url)
+
+    embed.set_footer(text="Lucas2 Mesai Takip • Anlık Süre Sorgulama")
+    embed.timestamp = datetime.now(timezone.utc)
     return embed
 
 def create_warning_embed(title: str, message: str) -> discord.Embed:
